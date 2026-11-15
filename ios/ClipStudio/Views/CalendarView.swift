@@ -248,7 +248,7 @@ struct PostMediaPreview: View {
     @State private var failure: String?
 
     var body: some View {
-        Group {
+        ZStack {  // a real container, so .task below runs once instead of restarting whenever the content switches
             if post.media.isEmpty {
                 placeholder(post.state == .posted ? "Posted. The file was removed from the server after posting." : "No media attached.")
             } else if let failure {
@@ -335,7 +335,7 @@ struct ClipReeditView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {  // a real container, so .task below runs once instead of restarting whenever the content switches
             if let analysis {
                 ClipEditorView(clip: $clip, analysis: analysis) { file, edited in
                     let latest = posts.posts.first { $0.id == post.id } ?? post

@@ -68,7 +68,7 @@ struct ProjectView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {  // a real container, so .task below runs once instead of restarting whenever the content switches
             switch model.phase {
             case .analyzing:
                 working(title: model.progressLabel, detail: "Everything here happens on your phone.", progress: model.progress)
