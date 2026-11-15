@@ -3,7 +3,7 @@
 An iPhone app for musicians: pick concert or practice footage, let Claude suggest clips, approve them, and have them post to Instagram on schedule. It also holds your posting calendar, idea bank and a home-screen widget.
 
 - `server/`: Cloudflare Worker (sign-in, planner sync, Claude, clip storage, Instagram auto-posting). Tested end to end with `npm test`.
-- `ios/`: SwiftUI app (coming next).
+- `ios/`: SwiftUI iPhone app. Version 0.1 finds and exports clips.
 
 Working name; rename any time.
 
@@ -33,6 +33,27 @@ npx wrangler deploy
 `deploy` prints your server address, like `https://clip-studio.<your-name>.workers.dev`. Put it in `PUBLIC_URL` in `wrangler.toml` and run `npx wrangler deploy` again.
 
 Check it: open the address in a browser. You should see `{"ok":true,"name":"clip-studio"}`.
+
+## Build the iPhone app
+
+You need Xcode and XcodeGen, a small tool that creates the Xcode project from `ios/project.yml`:
+
+```bash
+brew install xcodegen
+cd ios
+xcodegen
+open ClipStudio.xcodeproj
+```
+
+Run `xcodegen` again whenever you pull changes that add or remove files.
+
+In Xcode:
+1. Click the ClipStudio project, then the ClipStudio target, then Signing & Capabilities. Choose your Team (your Apple ID works before the Developer Program is active). To skip this step next time, put your Team ID in `DEVELOPMENT_TEAM` in `ios/project.yml`.
+2. Plug in your iPhone and pick it as the run destination at the top of the window.
+3. Press Run (⌘R). The first time, the iPhone asks you to turn on Developer Mode (Settings → Privacy & Security → Developer Mode) and to trust your developer certificate (Settings → General → VPN & Device Management).
+4. In the app, sign in with your test password (the `DEV_LOGIN_KEY` you set on the server).
+
+Sign in with Apple works once you're in the Apple Developer Program: uncomment the `applesignin` line in `ios/project.yml` and run `xcodegen` again.
 
 ## Connect Instagram (when we get to auto-posting)
 
