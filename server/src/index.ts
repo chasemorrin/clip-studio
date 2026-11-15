@@ -27,7 +27,8 @@ app.post("/v1/auth/apple", async (c) => {
 // Lets you test before Sign in with Apple is set up. Only works when DEV_LOGIN_KEY is set.
 app.post("/v1/auth/dev", async (c) => {
   const { key } = await c.req.json<{ key: string }>();
-  if (!c.env.DEV_LOGIN_KEY || key !== c.env.DEV_LOGIN_KEY) throw new HttpError(403, "forbidden", "Test sign-in is turned off.");
+  if (!c.env.DEV_LOGIN_KEY) throw new HttpError(403, "forbidden", "Test sign-in is turned off. Set the DEV_LOGIN_KEY secret to use it.");
+  if (key !== c.env.DEV_LOGIN_KEY) throw new HttpError(403, "wrong_password", "That test password is wrong.");
   const uid = await userForAppleSub(c.env, "dev");
   return c.json({ token: await createSession(c.env, uid), userId: uid });
 });
