@@ -19,6 +19,7 @@ struct VideoAnalysis {
     let sections: [ClosedRange<Double>] // stretches where the camera holds one shot
     let frames: [Frame]
     let isPortrait: Bool
+    let sourceSize: CGSize          // upright size of the footage in pixels
 
     /// Loudness scaled 0...1 for drawing a waveform.
     var waveform: [Float] {
@@ -67,7 +68,8 @@ enum VideoAnalyzer {
 
         progress(1, "Done")
         return VideoAnalysis(url: url, duration: duration, hop: hop, loudness: audio.loudness, activity: audio.activity,
-                             noisiness: audio.noisiness, breaths: audio.breaths, sections: sections, frames: frames, isPortrait: isPortrait)
+                             noisiness: audio.noisiness, breaths: audio.breaths, sections: sections, frames: frames, isPortrait: isPortrait,
+                             sourceSize: CGSize(width: abs(oriented.width), height: abs(oriented.height)))
     }
 
     // MARK: Audio

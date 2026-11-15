@@ -12,6 +12,7 @@ struct ClipSuggestion: Identifiable, Hashable {
     var hashtags: [String]
     var keep = false
     var fromClaude = true
+    var framing: Framing? = nil   // nil until the editor sets it up
 
     var length: Double { end - start }
 }

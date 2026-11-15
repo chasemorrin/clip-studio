@@ -20,7 +20,7 @@ enum ClipRenderer {
         }
     }
 
-    static func render(source: URL, start: Double, end: Double, text: String,
+    static func render(source: URL, start: Double, end: Double, text: String, framing: Framing?,
                        progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let asset = AVURLAsset(url: source)
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw RenderError.cantRead }
@@ -37,20 +37,14 @@ enum ClipRenderer {
             compAudio = t
         }
 
-        // Fit the footage into a vertical frame. Vertical video fills it; horizontal video sits in the middle.
+        // Place the footage in the vertical frame exactly as framed in the editor preview.
         let natural = try await videoTrack.load(.naturalSize)
         let preferred = try await videoTrack.load(.preferredTransform)
         let rect = CGRect(origin: .zero, size: natural).applying(preferred)
         let oriented = CGSize(width: abs(rect.width), height: abs(rect.height))
         let target = renderSize
-        let portrait = oriented.height > oriented.width
-        let scale = portrait ? max(target.width / oriented.width, target.height / oriented.height)
-                             : min(target.width / oriented.width, target.height / oriented.height)
-        let transform = preferred
-            .concatenating(CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
-            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-            .concatenating(CGAffineTransform(translationX: (target.width - oriented.width * scale) / 2,
-                                             y: (target.height - oriented.height * scale) / 2))
+        let place = (framing ?? Framing.automatic(for: oriented)).clamped(for: oriented)
+        let transform = place.transform(preferred: preferred, naturalSize: natural)
 
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: comp.duration)

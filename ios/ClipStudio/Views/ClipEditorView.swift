@@ -56,6 +56,10 @@ final class LoopingPlayer: ObservableObject {
 
     func pause() { player.pause() }
 
+    func togglePlay() {
+        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+    }
+
     deinit {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -81,11 +85,22 @@ struct ClipEditorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VideoPlayer(player: looper.player)
-                    .aspectRatio(analysis.isPortrait ? 9 / 16 : 16 / 9, contentMode: .fit)
-                    .frame(maxHeight: 440)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(timecode(clip.start, tenths: true)) – \(timecode(clip.end, tenths: true))")
+                        .font(.headline.monospacedDigit())
+                    Spacer()
+                    Text(String(format: "%.1f s", clip.length))
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(clip.length > 90 ? .orange : .secondary)
+                }
+
+                FramedPreview(player: looper.player, source: analysis.sourceSize, framing: framingBinding,
+                              text: clip.onScreenText, showText: showsTextNow, onTap: { looper.togglePlay() })
+                    .frame(maxHeight: 460)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                framingControls
 
                 if !clip.why.isEmpty {
                     Text(clip.why).font(.subheadline).foregroundStyle(.secondary)
@@ -152,6 +167,43 @@ struct ClipEditorView: View {
         .onChange(of: clip.onScreenText) { _, _ in output = nil; saved = false }
     }
 
+    /// The clip's framing, set up automatically the first time.
+    private var framingBinding: Binding<Framing> {
+        Binding(
+            get: { clip.framing ?? Framing.automatic(for: analysis.sourceSize) },
+            set: { clip.framing = $0; output = nil; saved = false }
+        )
+    }
+
+    private var showsTextNow: Bool {
+        let t = looper.currentTime - clip.start
+        return t >= 0.3 && t <= ClipRenderer.textSeconds
+    }
+
+    private var framingControls: some View {
+        let f = framingBinding.wrappedValue
+        let source = analysis.sourceSize
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Whole picture") { framingBinding.wrappedValue = Framing(zoom: 1) }
+                    .buttonStyle(.bordered)
+                    .tint(f.zoom <= 1.001 ? Theme.accent : .secondary)
+                Button("Fill frame") { framingBinding.wrappedValue = Framing(zoom: Framing.fillZoom(source)).clamped(for: source) }
+                    .buttonStyle(.bordered)
+                    .tint(abs(f.zoom - Framing.fillZoom(source)) < 0.01 && f.offsetX == 0 && f.offsetY == 0 ? Theme.accent : .secondary)
+                Spacer()
+                Text(f.zoom <= 1.001 ? "No crop" : String(format: "Zoom %.1f×", f.zoom))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            .controlSize(.small)
+            Text(f.crops(source)
+                 ? "Edges are cut off. Pinch to zoom out or drag to move. The export matches this preview."
+                 : "Pinch to zoom, drag to move, tap to pause. The export matches this preview.")
+                .font(.caption)
+                .foregroundStyle(f.crops(source) ? .orange : .secondary)
+        }
+    }
+
     private func rangeChanged() {
         output = nil
         saved = false
@@ -206,7 +258,8 @@ struct ClipEditorView: View {
         looper.pause()
         defer { rendering = false }
         do {
-            output = try await ClipRenderer.render(source: analysis.url, start: clip.start, end: clip.end, text: clip.onScreenText) { p in
+            output = try await ClipRenderer.render(source: analysis.url, start: clip.start, end: clip.end, text: clip.onScreenText,
+                                                   framing: framingBinding.wrappedValue) { p in
                 Task { @MainActor in renderProgress = p }
             }
             clip.keep = true
