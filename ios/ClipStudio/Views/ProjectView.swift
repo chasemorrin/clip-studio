@@ -5,6 +5,7 @@ final class ProjectModel: ObservableObject {
     enum Phase: Equatable { case analyzing, suggesting, ready, failed(String) }
 
     let url: URL
+    let useClaude: Bool
     @Published var phase: Phase = .analyzing
     @Published var progress: Double = 0
     @Published var progressLabel = "Getting ready…"
@@ -12,7 +13,10 @@ final class ProjectModel: ObservableObject {
     @Published var clips: [ClipSuggestion] = []
     @Published var note: String?
 
-    init(url: URL) { self.url = url }
+    init(url: URL, useClaude: Bool) {
+        self.url = url
+        self.useClaude = useClaude
+    }
 
     func start() async {
         guard analysis == nil else { return }
@@ -25,10 +29,17 @@ final class ProjectModel: ObservableObject {
                 }
             }
             analysis = a
-            await suggest()
+            if useClaude { await suggest() } else { onDevice() }
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    func onDevice() {
+        guard let a = analysis else { return }
+        clips = ClipSuggester.fallback(a)
+        note = clips.isEmpty ? "No clear phrases found. Try Claude, or a longer video." : "Picked from the audio alone, on your phone."
+        phase = .ready
     }
 
     func suggest() async {
@@ -48,8 +59,8 @@ final class ProjectModel: ObservableObject {
 struct ProjectView: View {
     @StateObject private var model: ProjectModel
 
-    init(url: URL) {
-        _model = StateObject(wrappedValue: ProjectModel(url: url))
+    init(url: URL, useClaude: Bool) {
+        _model = StateObject(wrappedValue: ProjectModel(url: url, useClaude: useClaude))
     }
 
     var body: some View {
@@ -95,7 +106,7 @@ struct ProjectView: View {
                     LabeledContent("Camera shots", value: "\(a.sections.count)")
                     LabeledContent("Phrase breaths found", value: "\(a.breaths.count)")
                 } footer: {
-                    if let note = model.note { Text(note).foregroundStyle(.orange) }
+                    if let note = model.note { Text(note).foregroundStyle(model.useClaude ? .orange : .secondary) }
                 }
                 Section("Tap a clip to watch, adjust and export it") {
                     ForEach($model.clips) { $clip in
@@ -110,7 +121,13 @@ struct ProjectView: View {
                     Button {
                         Task { await model.suggest() }
                     } label: {
-                        Label("Ask Claude for different clips", systemImage: "arrow.clockwise")
+                        Label(model.clips.contains(where: { $0.fromClaude }) ? "Ask Claude for different clips" : "Ask Claude to pick clips",
+                              systemImage: "sparkles")
+                    }
+                    Button {
+                        model.onDevice()
+                    } label: {
+                        Label("Use on-device picks", systemImage: "waveform")
                     }
                 }
             }

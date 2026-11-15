@@ -5,12 +5,19 @@ import SwiftUI
 @MainActor
 final class LoopingPlayer: ObservableObject {
     let player = AVPlayer()
+    @Published var currentTime: Double = 0
     private var start: Double = 0
     private var endObserver: NSObjectProtocol?
+    private var timeObserver: Any?
 
     func load(url: URL, start: Double, end: Double) {
         if player.currentItem == nil {
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        }
+        if timeObserver == nil {
+            timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0 / 30, preferredTimescale: 600), queue: .main) { [weak self] t in
+                Task { @MainActor in self?.currentTime = t.seconds }
+            }
         }
         if endObserver == nil {
             endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
@@ -35,6 +42,13 @@ final class LoopingPlayer: ObservableObject {
         player.play()
     }
 
+    /// Move the playhead to any point (from touching the waveform) and keep playing.
+    func seek(to t: Double) {
+        currentTime = t
+        player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.play()
+    }
+
     func restart() {
         player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         player.play()
@@ -44,6 +58,7 @@ final class LoopingPlayer: ObservableObject {
 
     deinit {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
     }
 }
 
@@ -76,19 +91,26 @@ struct ClipEditorView: View {
                     Text(clip.why).font(.subheadline).foregroundStyle(.secondary)
                 }
 
-                WaveformStrip(analysis: analysis, start: clip.start, end: clip.end)
-                    .frame(height: 64)
+                WaveformStrip(analysis: analysis, start: clip.start, end: clip.end, playhead: looper.currentTime) { t in
+                    looper.seek(to: min(t, clip.end - 0.1))
+                }
+                .frame(height: 72)
+
+                HStack(spacing: 10) {
+                    Button { looper.restart() } label: { Label("Hear the start", systemImage: "backward.end.fill") }
+                    Button { looper.previewEnding(end: clip.end) } label: { Label("Hear the ending", systemImage: "forward.end.fill") }
+                }
+                .buttonStyle(.bordered)
+                .font(.subheadline)
 
                 trimRow(label: "Start", value: $clip.start, isStart: true)
                 trimRow(label: "End", value: $clip.end, isStart: false)
-                Button("Hear the ending") { looper.previewEnding(end: clip.end) }
-                    .font(.subheadline)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("On-screen text").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     TextField("Leave empty for no text", text: $clip.onScreenText)
                         .textFieldStyle(.roundedBorder)
-                    Text("Shows near the top for the first few seconds.").font(.caption).foregroundStyle(.secondary)
+                    Text("Shows near the top for the first \(Int(ClipRenderer.textSeconds)) seconds.").font(.caption).foregroundStyle(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -229,39 +251,64 @@ struct ClipEditorView: View {
     private func nextBreath(after t: Double) -> Double? { analysis.breaths.first { $0 > t + 0.2 } }
 }
 
-/// The loudness around the clip, with the clip highlighted and phrase breaths marked.
+/// The loudness around the clip, with the clip highlighted, phrase breaths marked and a moving playhead.
+/// Touch or drag on it to move the playhead.
 struct WaveformStrip: View {
     let analysis: VideoAnalysis
     let start: Double
     let end: Double
+    var playhead: Double? = nil
+    var onSeek: ((Double) -> Void)? = nil
+
+    /// The stretch of time the strip shows: the clip plus some context on each side.
+    private var window: (lo: Double, hi: Double) {
+        let pad = max(8, (end - start) * 0.35)
+        return (max(0, start - pad), min(analysis.duration, end + pad))
+    }
 
     var body: some View {
-        Canvas { ctx, size in
-            let pad = max(8, (end - start) * 0.35)
-            let lo = max(0, start - pad), hi = min(analysis.duration, end + pad)
-            guard hi > lo else { return }
-            let wave = analysis.waveform
-            let x = { (t: Double) -> CGFloat in CGFloat((t - lo) / (hi - lo)) * size.width }
+        GeometryReader { geo in
+            Canvas { ctx, size in
+                let (lo, hi) = window
+                guard hi > lo, !analysis.waveform.isEmpty else { return }
+                let wave = analysis.waveform
+                let x = { (t: Double) -> CGFloat in CGFloat((t - lo) / (hi - lo)) * size.width }
 
-            ctx.fill(Path(CGRect(x: x(start), y: 0, width: x(end) - x(start), height: size.height)),
-                     with: .color(Theme.accent.opacity(0.18)))
+                ctx.fill(Path(CGRect(x: x(start), y: 0, width: x(end) - x(start), height: size.height)),
+                         with: .color(Theme.accent.opacity(0.18)))
 
-            let bars = Int(size.width / 3)
-            for b in 0..<bars {
-                let t = lo + (hi - lo) * Double(b) / Double(bars)
-                let i = min(wave.count - 1, max(0, Int(t / analysis.hop)))
-                let h = CGFloat(wave[i]) * size.height * 0.9 + 2
-                let inside = t >= start && t <= end
-                ctx.fill(Path(CGRect(x: CGFloat(b) * 3, y: (size.height - h) / 2, width: 2, height: h)),
-                         with: .color(inside ? Theme.accent : .secondary.opacity(0.5)))
+                let bars = Int(size.width / 3)
+                for b in 0..<bars {
+                    let t = lo + (hi - lo) * Double(b) / Double(bars)
+                    let i = min(wave.count - 1, max(0, Int(t / analysis.hop)))
+                    let h = CGFloat(wave[i]) * size.height * 0.9 + 2
+                    let inside = t >= start && t <= end
+                    ctx.fill(Path(CGRect(x: CGFloat(b) * 3, y: (size.height - h) / 2, width: 2, height: h)),
+                             with: .color(inside ? Theme.accent : .secondary.opacity(0.5)))
+                }
+                for br in analysis.breaths where br >= lo && br <= hi {
+                    ctx.fill(Path(CGRect(x: x(br) - 0.5, y: size.height - 6, width: 1, height: 6)), with: .color(.primary.opacity(0.6)))
+                }
+                for edge in [start, end] {
+                    ctx.fill(Path(CGRect(x: x(edge) - 1, y: 0, width: 2, height: size.height)), with: .color(Theme.accent))
+                }
+                if let p = playhead, p >= lo, p <= hi {
+                    let px = x(p)
+                    ctx.fill(Path(CGRect(x: px - 1, y: 0, width: 2, height: size.height)), with: .color(.primary))
+                    ctx.fill(Path(ellipseIn: CGRect(x: px - 5, y: -1, width: 10, height: 10)), with: .color(.primary))
+                }
             }
-            for br in analysis.breaths where br >= lo && br <= hi {
-                ctx.fill(Path(CGRect(x: x(br) - 0.5, y: size.height - 6, width: 1, height: 6)), with: .color(.primary.opacity(0.6)))
-            }
-            for edge in [start, end] {
-                ctx.fill(Path(CGRect(x: x(edge) - 1, y: 0, width: 2, height: size.height)), with: .color(Theme.accent))
-            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        guard let onSeek, geo.size.width > 0 else { return }
+                        let (lo, hi) = window
+                        let f = min(1, max(0, g.location.x / geo.size.width))
+                        onSeek(lo + (hi - lo) * Double(f))
+                    }
+            )
         }
-        .accessibilityLabel("Waveform from \(timecode(start)) to \(timecode(end)). Small ticks mark phrase breaths.")
+        .accessibilityLabel("Waveform from \(timecode(start)) to \(timecode(end)). Small ticks mark phrase breaths. Touch to move the playhead.")
     }
 }

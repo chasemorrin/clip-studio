@@ -6,6 +6,9 @@ import UIKit
 /// Turns a suggestion into a finished 9:16 clip: trimmed, standard (non-HDR) color, text overlay, soft audio edges.
 enum ClipRenderer {
     static let renderSize = CGSize(width: 1080, height: 1920)
+    /// On-screen text size in output pixels, and how long it stays up.
+    static let textSize: CGFloat = 76
+    static let textSeconds: Double = 6.0
 
     enum RenderError: LocalizedError {
         case cantRead, cantExport
@@ -111,23 +114,25 @@ enum ClipRenderer {
 
         let label = CATextLayer()
         label.string = NSAttributedString(string: text, attributes: [
-            .font: UIFont.systemFont(ofSize: 54, weight: .medium),
+            .font: UIFont.systemFont(ofSize: textSize, weight: .semibold),
             .foregroundColor: UIColor.white,
         ])
         label.alignmentMode = .center
         label.isWrapped = true
         label.contentsScale = 2
-        label.frame = CGRect(x: 80, y: 330, width: size.width - 160, height: 160)
+        label.frame = CGRect(x: 70, y: 300, width: size.width - 140, height: textSize * 2.6)
         label.shadowColor = UIColor.black.cgColor
-        label.shadowOpacity = 0.55
-        label.shadowRadius = 6
-        label.shadowOffset = CGSize(width: 0, height: 2)
+        label.shadowOpacity = 0.6
+        label.shadowRadius = 8
+        label.shadowOffset = CGSize(width: 0, height: 3)
         label.opacity = 0
 
+        // 0.3s wait, 0.5s fade in, hold, 0.5s fade out.
+        let total = textSeconds
         let fade = CAKeyframeAnimation(keyPath: "opacity")
         fade.values = [0, 0, 1, 1, 0]
-        fade.keyTimes = [0, 0.077, 0.205, 0.872, 1]   // 0.3s wait, 0.5s in, hold to 3.4s, out by 3.9s
-        fade.duration = 3.9
+        fade.keyTimes = [0, NSNumber(value: 0.3 / total), NSNumber(value: 0.8 / total), NSNumber(value: (total - 0.5) / total), 1]
+        fade.duration = total
         fade.beginTime = AVCoreAnimationBeginTimeAtZero
         fade.isRemovedOnCompletion = false
         fade.fillMode = .forwards

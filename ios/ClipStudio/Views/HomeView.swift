@@ -20,6 +20,7 @@ struct Movie: Transferable {
 
 struct Footage: Hashable, Identifiable {
     let url: URL
+    let useClaude: Bool
     var id: URL { url }
 }
 
@@ -30,6 +31,7 @@ struct HomeView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showSettings = false
+    @AppStorage("useClaude") private var useClaude = true
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,18 @@ struct HomeView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pick clips with").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    Picker("Pick clips with", selection: $useClaude) {
+                        Text("Claude").tag(true)
+                        Text("On-device only").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(useClaude
+                         ? "Claude looks at frames and the audio map. Uses one Claude request."
+                         : "Picks the busiest stretches from the audio alone. Free, works offline, less musical.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
                     Label(loading ? "Opening video…" : "Choose footage", systemImage: "video.badge.plus")
@@ -70,7 +84,7 @@ struct HomeView: View {
                 }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
-            .navigationDestination(item: $footage) { f in ProjectView(url: f.url) }
+            .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude) }
             .onChange(of: pick) { _, item in
                 guard let item else { return }
                 Task { await load(item) }
@@ -88,7 +102,7 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            footage = Footage(url: movie.url)
+            footage = Footage(url: movie.url, useClaude: useClaude)
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
         }
