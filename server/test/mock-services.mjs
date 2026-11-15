@@ -44,7 +44,7 @@ export function start(port) {
     }
     if (p === "/access_token") return send(res, 200, { access_token: "long-tok-1", token_type: "bearer", expires_in: 5184000 });
     if (p === "/refresh_access_token") return send(res, 200, { access_token: "long-tok-refreshed", token_type: "bearer", expires_in: 5184000 });
-    if (p === "/v25.0/me") return send(res, 200, { user_id: "1789", username: "chasemorrin_test" });
+    if (p === "/v25.0/me" && !url.searchParams.get("fields")?.includes("client_business_id")) return send(res, 200, { user_id: "1789", username: "chasemorrin_test" });
 
     // Unified login (Facebook Login for Business with a configuration)
     if (p === "/v25.0/oauth/access_token") {
@@ -54,9 +54,13 @@ export function start(port) {
       }
       return send(res, 200, { access_token: "suat-tok", token_type: "bearer" });
     }
-    if (p === "/v25.0/debug_token") {
-      return send(res, 200, { data: { granular_scopes: [{ scope: "instagram_basic", target_ids: ["1789"] }, { scope: "instagram_content_publish", target_ids: ["1789"] }] } });
-    }
+    // Like Meta's real behaviour when the app and account share a business portfolio:
+    // nothing in assigned accounts or token scopes; the account shows up on the business.
+    if (p === "/v25.0/me/assigned_instagram_accounts") return send(res, 200, { data: [] });
+    if (p === "/v25.0/debug_token") return send(res, 200, { data: { granular_scopes: [{ scope: "instagram_basic" }, { scope: "instagram_content_publish" }] } });
+    if (p === "/v25.0/me" && url.searchParams.get("fields")?.includes("client_business_id")) return send(res, 200, { id: "sysuser1", client_business_id: "biz1" });
+    if (p === "/v25.0/biz1/instagram_business_accounts") return send(res, 400, { error: { message: "Unsupported get request", code: 100 } });
+    if (p === "/v25.0/biz1/owned_instagram_accounts") return send(res, 200, { data: [{ id: "1789", username: "chasemorrin_test" }] });
     if (p === "/v25.0/1789" && req.method === "GET") return send(res, 200, { id: "1789", username: "chasemorrin_test" });
 
     let m;

@@ -7,6 +7,8 @@ export interface Env {
   IG_APP_ID: string;
   /** Unified login: the "Login URL" Meta generates for your configuration. When set, the server uses Unified login. */
   IG_LOGIN_URL?: string;
+  /** Optional: the Instagram account ID from Meta's dashboard, used if Meta doesn't report which account was shared. */
+  IG_ACCOUNT_ID?: string;
   IG_API_VERSION: string;
   CLAUDE_MODEL: string;
   CLAUDE_MAX_TOKENS: string;

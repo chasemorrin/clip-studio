@@ -98,31 +98,62 @@ async function finishUnified(env: Env, userId: string, code: string): Promise<{ 
   const token: string = tok.access_token;
   if (!token) throw new HttpError(502, "ig_failed", "Meta didn't return a login. Try again.");
 
-  // Which Instagram account(s) did the person share? The token's granted scopes list them.
-  let igUserId = "";
-  try {
-    const dbg = await igFetch(`${fbGraph(env)}/${v}/debug_token?${new URLSearchParams({ input_token: token, access_token: `${clientId}|${env.IG_APP_SECRET}` })}`);
-    const scopes: any[] = dbg?.data?.granular_scopes || [];
-    const pick = scopes.find((s) => s.scope === "instagram_content_publish" && s.target_ids?.length)
-      || scopes.find((s) => s.scope === "instagram_basic" && s.target_ids?.length);
-    igUserId = pick?.target_ids?.[0] ? String(pick.target_ids[0]) : "";
-  } catch (e) {
-    console.log("debug_token failed", String(e));
-  }
-  if (!igUserId) {
-    // Older style: Instagram account linked to a Facebook Page.
+  // Which Instagram account did the person share? Meta reports it in different places depending on
+  // how the app and the account are owned, so try each one and keep a short note of what we found.
+  const notes: string[] = [];
+  const found: { id: string; username?: string }[] = [];
+  const add = (list: any[]) => { for (const a of list || []) if (a?.id && !found.some((f) => f.id === String(a.id))) found.push({ id: String(a.id), username: a.username }); };
+  const tryEdge = async (label: string, url: string, pick: (r: any) => any[]) => {
+    if (found.length) return;
     try {
-      const pages = await igFetch(`${fbGraph(env)}/${v}/me/accounts?${new URLSearchParams({ fields: "instagram_business_account{id,username}", access_token: token })}`);
-      const withIg = (pages?.data || []).find((p: any) => p.instagram_business_account?.id);
-      igUserId = withIg ? String(withIg.instagram_business_account.id) : "";
+      const r = await igFetch(url);
+      const list = pick(r) || [];
+      notes.push(`${label} ${list.length}`);
+      add(list);
     } catch (e) {
-      console.log("me/accounts failed", String(e));
+      notes.push(`${label} error`);
+      console.log("ig discovery", label, String(e));
+    }
+  };
+  const q = (params: Record<string, string>) => new URLSearchParams({ ...params, access_token: token });
+
+  await tryEdge("assigned", `${fbGraph(env)}/${v}/me/assigned_instagram_accounts?${q({ fields: "id,username" })}`, (r) => r?.data);
+  await tryEdge("scopes", `${fbGraph(env)}/${v}/debug_token?${new URLSearchParams({ input_token: token, access_token: `${clientId}|${env.IG_APP_SECRET}` })}`, (r) => {
+    const scopes: any[] = r?.data?.granular_scopes || [];
+    const ids = scopes.filter((s) => String(s.scope).startsWith("instagram")).flatMap((s) => s.target_ids || []);
+    return [...new Set(ids)].map((id) => ({ id }));
+  });
+  if (!found.length) {
+    let biz = "";
+    try {
+      const me = await igFetch(`${fbGraph(env)}/${v}/me?${q({ fields: "id,client_business_id" })}`);
+      biz = me?.client_business_id ? String(me.client_business_id) : "";
+      notes.push(biz ? "business found" : "no business");
+    } catch (e) {
+      notes.push("business error");
+      console.log("ig discovery me", String(e));
+    }
+    if (biz) {
+      for (const edge of ["instagram_business_accounts", "owned_instagram_accounts", "instagram_accounts"]) {
+        await tryEdge(edge.replace(/_/g, " "), `${fbGraph(env)}/${v}/${biz}/${edge}?${q({ fields: "id,username" })}`, (r) => r?.data);
+      }
     }
   }
-  if (!igUserId) throw new HttpError(400, "no_account", "No Instagram account was shared. Connect again and select your Instagram account.");
+  await tryEdge("pages", `${fbGraph(env)}/${v}/me/accounts?${q({ fields: "instagram_business_account{id,username}" })}`,
+    (r) => (r?.data || []).map((p: any) => p.instagram_business_account).filter(Boolean));
+  if (!found.length && env.IG_ACCOUNT_ID) {
+    // Last resort: the Instagram account ID shown in Meta's dashboard, set on the server.
+    await tryEdge("configured", `${fbGraph(env)}/${v}/${env.IG_ACCOUNT_ID}?${q({ fields: "id,username" })}`, (r) => (r?.id ? [r] : []));
+  }
+  console.log("ig discovery", notes.join(", "));
+  if (!found.length) {
+    throw new HttpError(400, "no_account",
+      `Meta didn't say which Instagram account you shared. Checked: ${notes.join(", ")}. Send this message to Claude.`);
+  }
+  const igUserId = found[0].id;
 
-  let username = "";
-  try {
+  let username = found[0].username || "";
+  if (!username) try {
     const me = await igFetch(`${fbGraph(env)}/${v}/${igUserId}?${new URLSearchParams({ fields: "username", access_token: token })}`);
     username = me.username || "";
   } catch { /* the name is nice to have, not required */ }

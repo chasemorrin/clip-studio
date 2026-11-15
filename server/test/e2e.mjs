@@ -23,7 +23,8 @@ fs.writeFileSync(".dev.vars", [
   "IG_APP_ID=test-ig-app",
   "CLAUDE_DAILY_LIMIT=3",
   `FB_GRAPH_BASE=http://127.0.0.1:${MOCK}`,
-  ...(UNIFIED ? [`IG_LOGIN_URL=https://www.facebook.com/v25.0/dialog/oauth?client_id=test-app&redirect_uri=${encodeURIComponent(BASE + "/instagram/callback")}&config_id=cfg123&response_type=code`] : []),
+  // Always set explicitly, so the real value in wrangler.toml doesn't leak into tests.
+  `IG_LOGIN_URL=${UNIFIED ? `https://www.facebook.com/v25.0/dialog/oauth?client_id=test-app&redirect_uri=${encodeURIComponent(BASE + "/instagram/callback")}&config_id=cfg123&response_type=code` : ""}`,
 ].join("\n"));
 
 fs.rmSync(".wrangler/state", { recursive: true, force: true });
