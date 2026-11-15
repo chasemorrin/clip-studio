@@ -58,6 +58,7 @@ final class ProjectModel: ObservableObject {
 
 struct ProjectView: View {
     @StateObject private var model: ProjectModel
+    @State private var showBatch = false
 
     init(url: URL, useClaude: Bool) {
         _model = StateObject(wrappedValue: ProjectModel(url: url, useClaude: useClaude))
@@ -83,6 +84,9 @@ struct ProjectView: View {
         .navigationTitle("Suggested clips")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.start() }
+        .sheet(isPresented: $showBatch) {
+            if let a = model.analysis { BatchScheduleSheet(model: model, analysis: a) }
+        }
     }
 
     private func working(title: String, detail: String, progress: Double?) -> some View {
@@ -117,6 +121,18 @@ struct ProjectView: View {
                         }
                     }
                 }
+                let keptCount = model.clips.filter { $0.keep && $0.scheduledFor == nil }.count
+                Section {
+                    Button {
+                        showBatch = true
+                    } label: {
+                        Label(keptCount == 0 ? "Schedule kept clips" : "Schedule \(keptCount) kept clip\(keptCount == 1 ? "" : "s")…",
+                              systemImage: "calendar.badge.plus")
+                    }
+                    .disabled(keptCount == 0)
+                } footer: {
+                    Text("Turn on \"Keep this clip\" in each clip you like, then schedule them all at once into your next open posting days.")
+                }
                 Section {
                     Button {
                         Task { await model.suggest() }
@@ -143,7 +159,11 @@ struct ClipRow: View {
             HStack {
                 Text(clip.title).font(.headline)
                 Spacer()
-                if clip.keep { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent) }
+                if clip.scheduledFor != nil {
+                    Image(systemName: "calendar.badge.checkmark").foregroundStyle(Theme.accent)
+                } else if clip.keep {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent)
+                }
             }
             Text("\(timecode(clip.start))–\(timecode(clip.end)) · \(Int(clip.length.rounded()))s")
                 .font(.caption.monospacedDigit())

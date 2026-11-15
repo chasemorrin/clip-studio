@@ -36,6 +36,32 @@ final class APIClient {
         } catch {
             throw APIError(code: "offline", message: "Couldn't reach the server. Check your connection and try again.")
         }
+        return try await decode(data, response)
+    }
+
+    /// Uploads a finished clip (or photo) and returns its storage key.
+    func upload(file: URL, contentType: String = "video/mp4") async throws -> (key: String, type: String) {
+        let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
+        guard size > 0 else { throw APIError(code: "missing_file", message: "The clip file is missing. Make the clip again.") }
+        guard size < 95 * 1024 * 1024 else {
+            throw APIError(code: "too_big", message: "This clip is over 95 MB, too big to upload. Shorten it and try again.")
+        }
+        var req = URLRequest(url: Config.serverURL.appendingPathComponent("v1/media"))
+        req.httpMethod = "PUT"
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await session.upload(for: req, fromFile: file)
+        } catch {
+            throw APIError(code: "offline", message: "The upload didn't finish. Check your connection and try again.")
+        }
+        let r = try await decode(data, response)
+        guard let key = r["key"] as? String else { throw APIError(code: "bad_response", message: "The server didn't confirm the upload.") }
+        return (key, r["type"] as? String ?? "video")
+    }
+
+    private func decode(_ data: Data, _ response: URLResponse) async throws -> [String: Any] {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if !(200..<300).contains(status) {

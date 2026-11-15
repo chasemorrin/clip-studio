@@ -170,7 +170,8 @@ app.delete("/v1/items/:id", async (c) => {
 /* ---------- clips and photos ---------- */
 
 const TYPES: Record<string, string> = { "video/mp4": "mp4", "video/quicktime": "mov", "image/jpeg": "jpg" };
-const MAX_UPLOAD = 300 * 1024 * 1024;
+// Cloudflare's free plan accepts request bodies up to 100 MB.
+const MAX_UPLOAD = 95 * 1024 * 1024;
 
 app.put("/v1/media", async (c) => {
   const uid = c.get("uid");
@@ -179,7 +180,7 @@ app.put("/v1/media", async (c) => {
   if (!ext) throw new HttpError(415, "bad_type", "Upload an MP4 or MOV video, or a JPEG photo.");
   const size = Number(c.req.header("Content-Length") || 0);
   if (!size) throw new HttpError(411, "no_length", "The upload is missing its size.");
-  if (size > MAX_UPLOAD) throw new HttpError(413, "too_big", "That file is over 300 MB, Instagram's limit.");
+  if (size > MAX_UPLOAD) throw new HttpError(413, "too_big", "That file is over 95 MB, too big to upload. Shorten the clip and try again.");
   const key = `${uid}/${newId()}.${ext}`;
   await c.env.MEDIA.put(key, c.req.raw.body!, { httpMetadata: { contentType: type } });
   await c.env.DB.prepare("INSERT INTO media (key, user_id, content_type, size, created_at) VALUES (?, ?, ?, ?, ?)")

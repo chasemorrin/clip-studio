@@ -13,6 +13,8 @@ struct ClipSuggestion: Identifiable, Hashable {
     var keep = false
     var fromClaude = true
     var framing: Framing? = nil   // nil until the editor sets it up
+    var renderedURL: URL? = nil   // the finished clip, once made
+    var scheduledFor: Date? = nil
 
     var length: Double { end - start }
 }

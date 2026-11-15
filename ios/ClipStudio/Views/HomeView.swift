@@ -30,7 +30,6 @@ struct HomeView: View {
     @State private var footage: Footage?
     @State private var loading = false
     @State private var error: String?
-    @State private var showSettings = false
     @AppStorage("useClaude") private var useClaude = true
 
     var body: some View {
@@ -77,13 +76,6 @@ struct HomeView: View {
             .padding(.horizontal, 24)
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
-                }
-            }
-            .sheet(isPresented: $showSettings) { SettingsView() }
             .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude) }
             .onChange(of: pick) { _, item in
                 guard let item else { return }

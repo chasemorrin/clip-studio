@@ -83,17 +83,28 @@ enum ClipRenderer {
         session.videoComposition = video
         session.audioMix = mix
         session.shouldOptimizeForNetworkUse = true
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString.prefix(8)).mp4")
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("stage-\(UUID().uuidString.prefix(8)).mp4")
 
         let watcher = Task {
             for await state in session.states(updateInterval: 0.25) {
-                if case .exporting(let p) = state { progress(p.fractionCompleted) }
+                if case .exporting(let p) = state { progress(p.fractionCompleted * 0.7) }
             }
         }
-        defer { watcher.cancel() }
-        try await session.export(to: out, as: .mp4)
+        try await session.export(to: stage, as: .mp4)
+        watcher.cancel()
+        defer { try? FileManager.default.removeItem(at: stage) }
+
+        // Second pass: re-encode to Instagram's Reels spec at a sensible size.
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString.prefix(8)).mp4")
+        try await InstagramEncoder.encode(stage, to: out) { p in progress(0.7 + p * 0.3) }
         progress(1)
         return out
+    }
+
+    /// Renders a suggestion with its trim, text and framing.
+    static func render(clip: ClipSuggestion, analysis: VideoAnalysis, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        try await render(source: analysis.url, start: clip.start, end: clip.end, text: clip.onScreenText,
+                         framing: clip.framing ?? Framing.automatic(for: analysis.sourceSize), progress: progress)
     }
 
     /// Small text near the top, over the first few seconds, fading in and out.

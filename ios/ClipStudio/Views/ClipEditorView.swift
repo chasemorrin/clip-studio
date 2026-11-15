@@ -73,13 +73,15 @@ struct ClipEditorView: View {
     @StateObject private var looper = LoopingPlayer()
     @State private var rendering = false
     @State private var renderProgress = 0.0
-    @State private var output: URL?
     @State private var message: String?
     @State private var saved = false
 
-    private var fullCaption: String {
-        let tags = clip.hashtags.map { "#" + $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }.joined(separator: " ")
-        return tags.isEmpty ? clip.caption : "\(clip.caption)\n\n\(tags)"
+    @State private var showSchedule = false
+
+    /// The finished file, kept on the clip so scheduling can reuse it.
+    private var output: URL? {
+        get { clip.renderedURL }
+        nonmutating set { clip.renderedURL = newValue }
     }
 
     var body: some View {
@@ -132,7 +134,7 @@ struct ClipEditorView: View {
                     HStack {
                         Text("Caption").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Copy caption") { UIPasteboard.general.string = fullCaption; message = "Caption copied." }
+                        Button("Copy caption") { UIPasteboard.general.string = clip.fullCaption; message = "Caption copied." }
                             .font(.footnote)
                     }
                     TextEditor(text: $clip.caption)
@@ -165,6 +167,7 @@ struct ClipEditorView: View {
         .onChange(of: clip.start) { _, _ in rangeChanged() }
         .onChange(of: clip.end) { _, _ in rangeChanged() }
         .onChange(of: clip.onScreenText) { _, _ in output = nil; saved = false }
+        .sheet(isPresented: $showSchedule) { ScheduleSheet(clip: $clip, analysis: analysis) }
     }
 
     /// The clip's framing, set up automatically the first time.
@@ -212,6 +215,22 @@ struct ClipEditorView: View {
 
     @ViewBuilder
     private var exportSection: some View {
+        if let when = clip.scheduledFor {
+            Label("Scheduled for \(when.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))",
+                  systemImage: "calendar.badge.checkmark")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+        }
+        if !rendering {
+            Button {
+                looper.pause()
+                showSchedule = true
+            } label: {
+                Label(clip.scheduledFor == nil ? "Schedule for Instagram…" : "Schedule again…", systemImage: "calendar.badge.plus")
+                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+        }
         if rendering {
             VStack(alignment: .leading, spacing: 6) {
                 ProgressView(value: renderProgress)
@@ -225,7 +244,7 @@ struct ClipEditorView: View {
                             try await ClipRenderer.saveToPhotos(output)
                             saved = true
                             message = "Saved to Photos. The caption is ready to paste."
-                            UIPasteboard.general.string = fullCaption
+                            UIPasteboard.general.string = clip.fullCaption
                         } catch {
                             message = error.localizedDescription
                         }
@@ -234,7 +253,7 @@ struct ClipEditorView: View {
                     Label(saved ? "Saved to Photos" : "Save to Photos", systemImage: saved ? "checkmark" : "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(saved)
                 ShareLink(item: output) {
                     Label("Share…", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
@@ -245,9 +264,9 @@ struct ClipEditorView: View {
             Button {
                 Task { await render() }
             } label: {
-                Label("Make this clip", systemImage: "scissors").frame(maxWidth: .infinity).padding(.vertical, 6)
+                Label("Make clip to save or share", systemImage: "scissors").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
         }
     }
 
