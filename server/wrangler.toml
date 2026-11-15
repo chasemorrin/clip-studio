@@ -1,0 +1,37 @@
+name = "clip-studio"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Runs the Instagram publisher every 5 minutes.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "clip-studio"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "clip-studio-media"
+
+[vars]
+# The address this server is reachable at, no trailing slash. Set after the first deploy.
+PUBLIC_URL = "https://clip-studio.REPLACE.workers.dev"
+# The iOS app's bundle identifier (used to check Sign in with Apple).
+APPLE_BUNDLE_ID = "com.chasemorrin.clipstudio"
+# The URL scheme the app listens on after Instagram login.
+APP_URL_SCHEME = "clipstudio"
+# Instagram app ID from the Meta developer dashboard (Instagram > API setup with Instagram login).
+IG_APP_ID = ""
+IG_API_VERSION = "v25.0"
+CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_MAX_TOKENS = "4000"
+CLAUDE_DAILY_LIMIT = "150"
+
+# Secrets (set with `npx wrangler secret put NAME`, never in this file):
+#   SESSION_SECRET     long random string used to sign logins and media links
+#   ANTHROPIC_API_KEY  Claude API key from console.anthropic.com
+#   IG_APP_SECRET      Instagram app secret from the Meta developer dashboard
+#   DEV_LOGIN_KEY      optional; lets you sign in without Apple while testing

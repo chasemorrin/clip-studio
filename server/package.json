@@ -1,0 +1,23 @@
+{
+  "name": "clip-studio-server",
+  "version": "1.0.0",
+  "description": "Server for Clip Studio: sign-in, planner sync, Claude, Instagram auto-posting",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node test/e2e.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261115.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.162.0"
+  },
+  "private": true
+}
