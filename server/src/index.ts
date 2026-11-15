@@ -362,6 +362,29 @@ app.get("/instagram/deletion-status", (c) =>
 
 /* ---------- auto-posting ---------- */
 
+// Publish now instead of waiting for the 5-minute timer. Instagram still needs a little time
+// to process a video; the timer finishes anything that isn't done within this request.
+app.post("/v1/items/:id/publish-now", async (c) => {
+  const uid = c.get("uid");
+  const cur = await getItem(c.env, uid, c.req.param("id"));
+  if (!cur) throw new HttpError(404, "not_found", "That post doesn't exist anymore.");
+  if (cur.post_state === "posted") throw new HttpError(409, "posted", "This post is already on Instagram.");
+  if (cur.post_state === "children" || cur.post_state === "publishing") return c.json({ item: toJson(cur) });
+  if (!JSON.parse(cur.media || "[]").length) throw new HttpError(400, "no_media", "There's no clip attached to this post.");
+  const ig = await c.env.DB.prepare("SELECT 1 FROM ig_accounts WHERE user_id = ?").bind(uid).first();
+  if (!ig) throw new HttpError(400, "no_instagram", "Connect Instagram in Settings first.");
+  const now = nowSec();
+  await c.env.DB.prepare(`UPDATE items SET post_state='queued', publish_at=?, date=?, post_error=NULL, post_attempts=0,
+      ig_container_id=NULL, ig_children=NULL, updated_at=? WHERE id=?`)
+    .bind(now, new Date(now * 1000).toISOString().slice(0, 10), now, cur.id).run();
+  c.executionCtx.waitUntil((async () => {
+    await runPublisher(c.env);
+    await new Promise((r) => setTimeout(r, 20_000));
+    await runPublisher(c.env);
+  })().catch((e) => console.log("publish-now", String(e))));
+  return c.json({ item: toJson((await getItem(c.env, uid, cur.id))!) });
+});
+
 app.post("/v1/items/:id/retry", async (c) => {
   const uid = c.get("uid");
   const cur = await getItem(c.env, uid, c.req.param("id"));

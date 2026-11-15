@@ -161,6 +161,18 @@ try {
     assert.match(it.permalink, /instagram\.com\/reel\//);
     assert.equal((await api("GET", `/v1/media-url/${clipKey}`)).status, 404, "file deleted after posting");
   });
+  await check("post now starts publishing right away", async () => {
+    const k = (await api("PUT", "/v1/media", new Uint8Array(8000), { "content-type": "video/mp4" })).json.key;
+    const later = Math.floor(Date.now() / 1000) + 86400;
+    const r = await api("POST", "/v1/items", { title: "Now", format: "reel", media: [{ key: k, type: "video" }], publishAt: later, autoPost: true });
+    const pn = await api("POST", `/v1/items/${r.json.item.id}/publish-now`);
+    assert.equal(pn.status, 200, JSON.stringify(pn.json));
+    await sleep(1500);
+    const it = (await api("GET", "/v1/items")).json.items.find((x) => x.id === r.json.item.id);
+    assert.ok(["publishing", "posted"].includes(it.postState), JSON.stringify(it));
+    await tick(); await tick();
+    assert.equal((await api("GET", "/v1/items")).json.items.find((x) => x.id === it.id).postState, "posted");
+  });
   await check("future posts wait for their time", async () => {
     const k = (await api("PUT", "/v1/media", new Uint8Array(5000), { "content-type": "video/mp4" })).json.key;
     const future = Math.floor(Date.now() / 1000) + 3600;

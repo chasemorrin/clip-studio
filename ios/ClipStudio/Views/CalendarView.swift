@@ -37,6 +37,12 @@ struct CalendarView: View {
                             PostRow(post: post)
                                 .contentShape(Rectangle())
                                 .onTapGesture { if post.isEditable { editing = post } }
+                                .swipeActions(edge: .leading) {
+                                    if post.state != .posting {
+                                        Button { Task { await posts.postNow(post) } } label: { Label("Post now", systemImage: "paperplane.fill") }
+                                            .tint(Theme.accent)
+                                    }
+                                }
                                 .swipeActions(edge: .trailing) {
                                     if post.state != .posting {
                                         Button(role: .destructive) { Task { await posts.delete(post) } } label: { Label("Delete", systemImage: "trash") }
@@ -151,6 +157,28 @@ struct PostEditSheet: View {
                     TextEditor(text: $caption).frame(minHeight: 140)
                     if caption.contains("[") {
                         Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                if session.instagramUsername != nil {
+                    Section {
+                        Button {
+                            Task {
+                                saving = true
+                                defer { saving = false }
+                                do {
+                                    try await posts.update(post, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
+                                    try await posts.postNow(id: post.id)
+                                    dismiss()
+                                } catch {
+                                    self.error = error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            Label("Post to Instagram now", systemImage: "paperplane.fill")
+                        }
+                        .disabled(saving)
+                    } footer: {
+                        Text("Saves your caption and posts right away. Usually live within 1–3 minutes.")
                     }
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }

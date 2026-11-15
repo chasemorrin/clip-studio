@@ -122,8 +122,9 @@ final class PostsStore: ObservableObject {
         }
     }
 
-    /// Uploads a finished clip and puts it on the calendar.
-    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool) async throws {
+    /// Uploads a finished clip and puts it on the calendar. Returns the new post's id.
+    @discardableResult
+    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool) async throws -> String {
         let media = try await APIClient.shared.upload(file: file)
         var body: [String: Any] = [
             "title": clip.title,
@@ -137,8 +138,19 @@ final class PostsStore: ObservableObject {
             "media": [["key": media.key, "type": media.type]],
         ]
         if autoPost { body["autoPost"] = true }
-        try await APIClient.shared.request("POST", "v1/items", json: body)
+        let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
+        return (r["item"] as? [String: Any])?["id"] as? String ?? ""
+    }
+
+    /// Start publishing right away instead of waiting for the scheduled time.
+    func postNow(id: String) async throws {
+        try await APIClient.shared.request("POST", "v1/items/\(id)/publish-now")
+        await refresh()
+    }
+
+    func postNow(_ post: Post) async {
+        do { try await postNow(id: post.id) } catch { self.error = error.localizedDescription }
     }
 
     func update(_ post: Post, publishAt: Date, caption: String, autoPost: Bool) async throws {

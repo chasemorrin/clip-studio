@@ -43,6 +43,18 @@ struct ScheduleSheet: View {
                          ? "It posts within 5 minutes of the time you pick. You can change or cancel it in Calendar."
                          : "Connect Instagram in Settings to post automatically. Until then it goes on your calendar as a reminder.")
                 }
+                if instagramConnected {
+                    Section {
+                        Button {
+                            Task { await schedule(postNow: true) }
+                        } label: {
+                            Label("Post to Instagram now", systemImage: "paperplane.fill")
+                        }
+                        .disabled(working != nil)
+                    } footer: {
+                        Text("Skips the calendar time. Usually live on Instagram within 1–3 minutes.")
+                    }
+                }
                 Section("Caption") {
                     Text(clip.fullCaption).font(.callout)
                     if clip.caption.contains("[") {
@@ -79,7 +91,7 @@ struct ScheduleSheet: View {
         }
     }
 
-    private func schedule() async {
+    private func schedule(postNow: Bool = false) async {
         error = nil
         do {
             let file: URL
@@ -95,8 +107,13 @@ struct ScheduleSheet: View {
             }
             working = "Uploading…"
             progress = nil
-            try await posts.schedule(file: file, clip: clip, at: when, autoPost: autoPost && instagramConnected)
-            clip.scheduledFor = when
+            let at = postNow ? Date() : when
+            let id = try await posts.schedule(file: file, clip: clip, at: at, autoPost: postNow || (autoPost && instagramConnected))
+            if postNow {
+                working = "Sending to Instagram…"
+                try await posts.postNow(id: id)
+            }
+            clip.scheduledFor = at
             clip.keep = true
             dismiss()
         } catch {
