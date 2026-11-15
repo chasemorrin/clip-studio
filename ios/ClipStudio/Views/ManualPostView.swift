@@ -9,6 +9,7 @@ struct ManualItem: Identifiable {
     let image: UIImage?
     let videoURL: URL?
     let thumbnail: UIImage
+    var assetID: String? = nil
     var isVideo: Bool { videoURL != nil }
 }
 
@@ -28,7 +29,7 @@ struct ManualImport: Identifiable, Hashable {
                 gen.appliesPreferredTrackTransform = true
                 gen.maximumSize = CGSize(width: 400, height: 400)
                 let thumb = (try? await gen.image(at: CMTime(seconds: 0.5, preferredTimescale: 600))).map { UIImage(cgImage: $0.image) }
-                items.append(ManualItem(image: nil, videoURL: movie.url, thumbnail: thumb ?? UIImage(systemName: "video")!))
+                items.append(ManualItem(image: nil, videoURL: movie.url, thumbnail: thumb ?? UIImage(systemName: "video")!, assetID: pick.itemIdentifier))
             } else if let data = try await pick.loadTransferable(type: Data.self), let image = UIImage(data: data) {
                 items.append(ManualItem(image: image, videoURL: nil, thumbnail: image))
             }

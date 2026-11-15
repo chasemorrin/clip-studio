@@ -39,7 +39,7 @@ enum AnalyzerError: LocalizedError {
         switch self {
         case .noVideo: return "That file doesn't have a video track."
         case .noAudio: return "That video has no sound, so there's nothing to find phrases in."
-        case .tooShort: return "That video is too short. Pick one that's at least 20 seconds long."
+        case .tooShort: return "That video is too short to find clips in. Pick one at least 20 seconds long, or use Manual."
         }
     }
 }
@@ -48,12 +48,14 @@ enum VideoAnalyzer {
     static let sampleRate: Double = 11025
     static let hop: Double = 0.25
 
-    static func analyze(url: URL, progress: @escaping @Sendable (Double, String) -> Void) async throws -> VideoAnalysis {
+    static func analyze(url: URL, minimumDuration: Double = 20, requireAudio: Bool = true,
+                        progress: @escaping @Sendable (Double, String) -> Void) async throws -> VideoAnalysis {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
-        guard duration >= 20 else { throw AnalyzerError.tooShort }
+        guard duration >= minimumDuration else { throw AnalyzerError.tooShort }
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw AnalyzerError.noVideo }
-        guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else { throw AnalyzerError.noAudio }
+        let audioTrack = try await asset.loadTracks(withMediaType: .audio).first
+        if audioTrack == nil && requireAudio { throw AnalyzerError.noAudio }
 
         let size = try await videoTrack.load(.naturalSize)
         let transform = try await videoTrack.load(.preferredTransform)
@@ -61,7 +63,9 @@ enum VideoAnalyzer {
         let isPortrait = abs(oriented.height) > abs(oriented.width)
 
         progress(0.05, "Listening to the audio…")
-        let samples = try readAudio(asset: asset, track: audioTrack, duration: duration) { p in progress(0.05 + p * 0.45, "Listening to the audio…") }
+        let samples = try audioTrack.map { track in
+            try readAudio(asset: asset, track: track, duration: duration) { p in progress(0.05 + p * 0.45, "Listening to the audio…") }
+        } ?? []
         let audio = measure(samples: samples)
 
         progress(0.5, "Looking at the footage…")

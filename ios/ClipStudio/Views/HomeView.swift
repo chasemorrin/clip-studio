@@ -25,16 +25,38 @@ struct Footage: Hashable, Identifiable {
     var id: URL { url }
 }
 
+enum PickMode: String, CaseIterable, Identifiable {
+    case claude, device, manual
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .claude: return "Claude"
+        case .device: return "On-device"
+        case .manual: return "Manual"
+        }
+    }
+    var explanation: String {
+        switch self {
+        case .claude: return "Claude looks at frames and the audio map and suggests the best moments. Uses one Claude request."
+        case .device: return "Picks the busiest stretches from the audio alone. Free, works offline, less musical."
+        case .manual: return "Use a whole video or your own photos as is. Trim, frame, caption and schedule them yourself."
+        }
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject var session: SessionStore
+    @AppStorage("pickMode") private var modeRaw = PickMode.claude.rawValue
     @State private var pick: PhotosPickerItem?
+    @State private var manualPicks: [PhotosPickerItem] = []
     @State private var footage: Footage?
+    @State private var manualVideo: Footage?
+    @State private var photos: PhotoImport?
+    @State private var mixed: ManualImport?
     @State private var loading = false
     @State private var error: String?
-    @AppStorage("useClaude") private var useClaude = true
-    @State private var manualPicks: [PhotosPickerItem] = []
-    @State private var manual: ManualImport?
-    @State private var loadingManual = false
+
+    private var mode: PickMode { PickMode(rawValue: modeRaw) ?? .claude }
 
     var body: some View {
         NavigationStack {
@@ -44,43 +66,37 @@ struct HomeView: View {
                     .font(.system(size: 56, weight: .light))
                     .foregroundStyle(Theme.accent)
                 VStack(spacing: 8) {
-                    Text("Find clips in your footage")
+                    Text("Make a post")
                         .font(.title2.weight(.semibold))
-                    Text("Pick a concert or practice video. Claude listens for the phrases, watches the shots, and suggests the best 20–40 second moments.")
+                    Text("Pick a concert or practice video and let Claude find the moments, or bring your own finished video or photos.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Pick clips with").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                    Picker("Pick clips with", selection: $useClaude) {
-                        Text("Claude").tag(true)
-                        Text("On-device only").tag(false)
+                    Picker("Pick clips with", selection: $modeRaw) {
+                        ForEach(PickMode.allCases) { m in Text(m.label).tag(m.rawValue) }
                     }
                     .pickerStyle(.segmented)
-                    Text(useClaude
-                         ? "Claude looks at frames and the audio map. Uses one Claude request."
-                         : "Picks the busiest stretches from the audio alone. Free, works offline, less musical.")
+                    Text(mode.explanation)
                         .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
-                    Label(loading ? "Opening video…" : "Choose footage", systemImage: "video.badge.plus")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                Group {
+                    if mode == .manual {
+                        PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
+                            buttonLabel(loading ? "Opening…" : "Choose video or photos")
+                        }
+                    } else {
+                        PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
+                            buttonLabel(loading ? "Opening video…" : "Choose footage")
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(loading)
-                PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
-                    Label(loadingManual ? "Opening…" : "Import finished post", systemImage: "square.and.arrow.down.on.square")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.bordered)
-                .disabled(loading || loadingManual)
-                Text("Manual: post your own photos or a finished video as is, then add a title, caption and time.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                if loading || loadingManual { ProgressView() }
+                if loading { ProgressView() }
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
                 }
@@ -90,25 +106,29 @@ struct HomeView: View {
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
-            .navigationDestination(item: $manual) { m in ManualPostView(items: m.items) }
-            .onChange(of: manualPicks) { _, picks in
-                guard !picks.isEmpty else { return }
-                Task {
-                    loadingManual = true
-                    error = nil
-                    defer { loadingManual = false; manualPicks = [] }
-                    do { manual = try await ManualImport.load(picks) } catch { self.error = error.localizedDescription }
-                }
-            }
+            .navigationDestination(item: $manualVideo) { f in ManualVideoView(url: f.url, assetID: f.assetID) }
+            .navigationDestination(item: $photos) { p in PhotoPostView(images: p.images) }
+            .navigationDestination(item: $mixed) { m in ManualPostView(items: m.items) }
             .onChange(of: pick) { _, item in
                 guard let item else { return }
-                Task { await load(item) }
+                Task { await loadFootage(item) }
+            }
+            .onChange(of: manualPicks) { _, picks in
+                guard !picks.isEmpty else { return }
+                Task { await loadManual(picks) }
             }
             .task { await session.refreshProfile() }
         }
     }
 
-    private func load(_ item: PhotosPickerItem) async {
+    private func buttonLabel(_ text: String) -> some View {
+        Label(text, systemImage: mode == .manual ? "photo.on.rectangle.angled" : "video.badge.plus")
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+    }
+
+    private func loadFootage(_ item: PhotosPickerItem) async {
         loading = true
         error = nil
         defer { loading = false; pick = nil }
@@ -117,9 +137,30 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            footage = Footage(url: movie.url, useClaude: useClaude, assetID: item.itemIdentifier)
+            footage = Footage(url: movie.url, useClaude: mode == .claude, assetID: item.itemIdentifier)
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
+        }
+    }
+
+    /// Manual: one video opens the editor with the whole video; photos open the photo screen;
+    /// a mix of several videos/photos is posted as is.
+    private func loadManual(_ picks: [PhotosPickerItem]) async {
+        loading = true
+        error = nil
+        defer { loading = false; manualPicks = [] }
+        do {
+            let imported = try await ManualImport.load(picks)
+            let videos = imported.items.filter(\.isVideo)
+            if imported.items.count == 1, let v = videos.first, let url = v.videoURL {
+                manualVideo = Footage(url: url, useClaude: false, assetID: v.assetID)
+            } else if videos.isEmpty {
+                photos = PhotoImport(images: imported.items.compactMap(\.image))
+            } else {
+                mixed = imported
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }
