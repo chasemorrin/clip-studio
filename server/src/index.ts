@@ -15,6 +15,40 @@ app.onError((err, c) => {
 
 app.get("/", (c) => c.json({ ok: true, name: "clip-studio" }));
 
+const page = (title: string, body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Clip Studio</title>
+<style>body{font:16px/1.6 -apple-system,system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 20px;color:#1c1c1e}
+h1{font-size:28px}h2{font-size:18px;margin-top:28px}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}}</style>
+</head><body>${body}</body></html>`;
+
+app.get("/privacy", (c) => c.html(page("Privacy policy", `
+<h1>Clip Studio privacy policy</h1>
+<p>Last updated November 15, 2026.</p>
+<p>Clip Studio helps musicians find short clips in their own performance videos, plan posts and publish them to their own Instagram account.</p>
+<h2>What we store</h2>
+<ul>
+<li>Your account: an anonymous ID from Sign in with Apple.</li>
+<li>Your posting calendar: titles, captions, dates and notes you enter.</li>
+<li>Clips you choose to schedule, only until they're posted. They're deleted from our storage after posting.</li>
+<li>Your Instagram connection: the account ID, username and access token Meta provides, used only to publish the posts you schedule.</li>
+</ul>
+<h2>What we don't do</h2>
+<ul>
+<li>Your full videos stay on your phone. The app analyzes them on the device.</li>
+<li>We don't sell or share your data, run ads, or use it to track you.</li>
+<li>We don't read your Instagram messages, comments or followers.</li>
+</ul>
+<h2>Claude</h2>
+<p>When you ask Claude (by Anthropic) to suggest clips or write captions, a few still frames, an audio summary and your description of your music are sent to Anthropic's API to produce the answer.</p>
+<h2>Deleting your data</h2>
+<p>In the app, open Settings and choose Delete account and data. This removes everything above from our servers. Removing Clip Studio from your Meta or Instagram settings also deletes the Instagram connection.</p>
+<h2>Contact</h2>
+<p>Questions: use the contact details on the Clip Studio listing.</p>`)));
+
+app.get("/terms", (c) => c.html(page("Terms", `
+<h1>Clip Studio terms</h1>
+<p>Use Clip Studio only with videos and music you have the right to post. You're responsible for what you publish to your Instagram account. The service is provided as is, without warranty.</p>`)));
+
 /* ---------- sign in ---------- */
 
 app.post("/v1/auth/apple", async (c) => {
