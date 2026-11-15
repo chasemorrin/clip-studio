@@ -3,6 +3,12 @@ import Foundation
 import SwiftUI
 import UIKit
 
+struct MediaRef: Hashable {
+    let key: String
+    let type: String
+    var isVideo: Bool { type == "video" }
+}
+
 /// A post on the server's calendar.
 struct Post: Identifiable, Hashable {
     let id: String
@@ -15,6 +21,8 @@ struct Post: Identifiable, Hashable {
     var postState: String?
     var postError: String?
     var permalink: URL?
+    var media: [MediaRef] = []
+    var plan: ClipPlan?
 
     init?(_ d: [String: Any]) {
         guard let id = d["id"] as? String else { return nil }
@@ -28,6 +36,10 @@ struct Post: Identifiable, Hashable {
         postState = d["postState"] as? String
         postError = d["postError"] as? String
         permalink = (d["permalink"] as? String).flatMap(URL.init(string:))
+        media = (d["media"] as? [[String: Any]] ?? []).compactMap { m in
+            (m["key"] as? String).map { MediaRef(key: $0, type: m["type"] as? String ?? "video") }
+        }
+        plan = ClipPlan(json: d["plan"])
     }
 
     enum State { case scheduled, posting, posted, failed, notAutoPosting }
@@ -124,16 +136,39 @@ final class PostsStore: ObservableObject {
 
     /// Uploads a finished clip and puts it on the calendar. Returns the new post's id.
     @discardableResult
-    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool) async throws -> String {
+    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool, sourceAssetID: String? = nil) async throws -> String {
         let media = try await APIClient.shared.upload(file: file)
         return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why, format: "reel",
-                                media: [media], at: date, autoPost: autoPost)
+                                media: [media], at: date, autoPost: autoPost,
+                                plan: sourceAssetID.flatMap { ClipPlan(clip: clip, assetId: $0).json })
+    }
+
+    /// Replaces a scheduled clip's video after re-editing it, and removes the old file.
+    func replaceClip(_ post: Post, file: URL, clip: ClipSuggestion, sourceAssetID: String) async throws {
+        let media = try await APIClient.shared.upload(file: file)
+        var body: [String: Any] = [
+            "title": clip.title,
+            "caption": clip.fullCaption,
+            "media": [["key": media.key, "type": media.type]],
+        ]
+        if let plan = ClipPlan(clip: clip, assetId: sourceAssetID).json { body["plan"] = plan }
+        try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
+        for old in post.media where old.key != media.key {
+            _ = try? await APIClient.shared.request("DELETE", "v1/media/\(old.key)")
+        }
+        await refresh()
+    }
+
+    /// A temporary link to preview a post's file.
+    func previewURL(for media: MediaRef) async -> URL? {
+        guard let r = try? await APIClient.shared.request("GET", "v1/media-url/\(media.key)"), let s = r["url"] as? String else { return nil }
+        return URL(string: s)
     }
 
     /// Puts already-uploaded media on the calendar. Returns the new post's id.
     @discardableResult
     func create(title: String, caption: String, notes: String = "", format: String,
-                media: [(key: String, type: String)], at date: Date, autoPost: Bool) async throws -> String {
+                media: [(key: String, type: String)], at date: Date, autoPost: Bool, plan: [String: Any]? = nil) async throws -> String {
         var body: [String: Any] = [
             "title": title,
             "pillar": "live",
@@ -146,6 +181,7 @@ final class PostsStore: ObservableObject {
             "media": media.map { ["key": $0.key, "type": $0.type] },
         ]
         if autoPost { body["autoPost"] = true }
+        if let plan { body["plan"] = plan }
         let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""

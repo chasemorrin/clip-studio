@@ -20,6 +20,7 @@ struct VideoAnalysis {
     let frames: [Frame]
     let isPortrait: Bool
     let sourceSize: CGSize          // upright size of the footage in pixels
+    var sourceAssetID: String? = nil // the video in Photos, so a scheduled clip can be reopened later
 
     /// Loudness scaled 0...1 for drawing a waveform.
     var waveform: [Float] {

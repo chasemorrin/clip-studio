@@ -79,6 +79,8 @@ struct SettingsView: View {
                          : "New clips go to your next open posting day at this time. You can change any single post in Calendar.")
                 }
 
+                FriendHandlesSection()
+
                 Section {
                     TextEditor(text: $profile)
                         .frame(minHeight: 140)

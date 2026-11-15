@@ -108,7 +108,8 @@ struct ScheduleSheet: View {
             working = "Uploading…"
             progress = nil
             let at = postNow ? Date() : when
-            let id = try await posts.schedule(file: file, clip: clip, at: at, autoPost: postNow || (autoPost && instagramConnected))
+            let id = try await posts.schedule(file: file, clip: clip, at: at, autoPost: postNow || (autoPost && instagramConnected),
+                                              sourceAssetID: analysis.sourceAssetID)
             if postNow {
                 working = "Sending to Instagram…"
                 try await posts.postNow(id: id)
@@ -228,7 +229,8 @@ struct BatchScheduleSheet: View {
                 working = "\(label): uploading…"
                 progress = nil
                 let when = times[c.id] ?? Date().addingTimeInterval(3600)
-                try await posts.schedule(file: file!, clip: model.clips[i], at: when, autoPost: autoPost && instagramConnected)
+                try await posts.schedule(file: file!, clip: model.clips[i], at: when, autoPost: autoPost && instagramConnected,
+                                         sourceAssetID: analysis.sourceAssetID)
                 model.clips[i].scheduledFor = when
                 done += 1
             } catch {

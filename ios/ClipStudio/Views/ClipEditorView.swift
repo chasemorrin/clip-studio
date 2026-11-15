@@ -69,8 +69,12 @@ final class LoopingPlayer: ObservableObject {
 struct ClipEditorView: View {
     @Binding var clip: ClipSuggestion
     let analysis: VideoAnalysis
+    /// When set, the editor saves back to an existing scheduled post instead of offering Schedule.
+    var onSaveToPost: ((URL, ClipSuggestion) async throws -> Void)? = nil
 
     @StateObject private var looper = LoopingPlayer()
+    @State private var savingToPost = false
+    @State private var savedToPost = false
     @State private var rendering = false
     @State private var renderProgress = 0.0
     @State private var message: String?
@@ -81,7 +85,10 @@ struct ClipEditorView: View {
     /// The finished file, kept on the clip so scheduling can reuse it.
     private var output: URL? {
         get { clip.renderedURL }
-        nonmutating set { clip.renderedURL = newValue }
+        nonmutating set {
+            clip.renderedURL = newValue
+            if newValue == nil { savedToPost = false }
+        }
     }
 
     var body: some View {
@@ -143,8 +150,7 @@ struct ClipEditorView: View {
                         Button("Copy caption") { UIPasteboard.general.string = clip.fullCaption; message = "Caption copied." }
                             .font(.footnote)
                     }
-                    TextEditor(text: $clip.caption)
-                        .frame(minHeight: 90)
+                    CaptionEditor(text: $clip.caption, minHeight: 90)
                         .padding(6)
                         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                     if !clip.hashtags.isEmpty {
@@ -227,7 +233,17 @@ struct ClipEditorView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.accent)
         }
-        if !rendering {
+        if let onSaveToPost, !rendering {
+            Button {
+                Task { await saveToPost(onSaveToPost) }
+            } label: {
+                Label(savingToPost ? "Saving…" : savedToPost ? "Saved to the post" : "Save changes to this post",
+                      systemImage: savedToPost ? "checkmark" : "square.and.arrow.up.on.square")
+                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(savingToPost || savedToPost)
+        } else if !rendering {
             Button {
                 looper.pause()
                 showSchedule = true
@@ -273,6 +289,21 @@ struct ClipEditorView: View {
                 Label("Make clip to save or share", systemImage: "scissors").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    private func saveToPost(_ save: (URL, ClipSuggestion) async throws -> Void) async {
+        savingToPost = true
+        defer { savingToPost = false }
+        if output == nil || !FileManager.default.fileExists(atPath: output!.path) { await render() }
+        guard let file = output else { return }
+        do {
+            message = "Uploading the new version…"
+            try await save(file, clip)
+            savedToPost = true
+            message = "Saved. The new version replaces the scheduled one."
+        } catch {
+            message = error.localizedDescription
         }
     }
 

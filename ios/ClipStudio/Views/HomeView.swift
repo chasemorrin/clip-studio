@@ -21,6 +21,7 @@ struct Movie: Transferable {
 struct Footage: Hashable, Identifiable {
     let url: URL
     let useClaude: Bool
+    var assetID: String? = nil
     var id: URL { url }
 }
 
@@ -88,7 +89,7 @@ struct HomeView: View {
             .padding(.horizontal, 24)
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude) }
+            .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
             .navigationDestination(item: $manual) { m in ManualPostView(items: m.items) }
             .onChange(of: manualPicks) { _, picks in
                 guard !picks.isEmpty else { return }
@@ -116,7 +117,7 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            footage = Footage(url: movie.url, useClaude: useClaude)
+            footage = Footage(url: movie.url, useClaude: useClaude, assetID: item.itemIdentifier)
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
         }

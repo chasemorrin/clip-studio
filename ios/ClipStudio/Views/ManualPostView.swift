@@ -115,7 +115,7 @@ struct ManualPostView: View {
                     TextField("Title for your calendar", text: $title)
                 }
                 Section {
-                    TextEditor(text: $caption).frame(minHeight: 120)
+                    CaptionEditor(text: $caption, minHeight: 120)
                 } header: {
                     Text("Caption")
                 } footer: {

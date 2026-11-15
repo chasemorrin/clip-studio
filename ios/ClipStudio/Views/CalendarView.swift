@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 /// What's scheduled and what's been posted.
@@ -145,9 +146,23 @@ struct PostEditSheet: View {
     @State private var saving = false
     @State private var error: String?
 
+    /// The latest copy from the server (it changes after re-editing the clip).
+    private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    PostMediaPreview(post: current)
+                        .listRowInsets(EdgeInsets())
+                    if let plan = current.plan, current.isEditable {
+                        NavigationLink {
+                            ClipReeditView(post: current, plan: plan)
+                        } label: {
+                            Label("Edit clip: trim, text and framing", systemImage: "scissors")
+                        }
+                    }
+                }
                 Section("Title") {
                     TextField("Title", text: $title)
                 }
@@ -159,7 +174,7 @@ struct PostEditSheet: View {
                     if session.instagramUsername == nil { Text("Connect Instagram in Settings to post automatically.") }
                 }
                 Section("Caption") {
-                    TextEditor(text: $caption).frame(minHeight: 140)
+                    CaptionEditor(text: $caption, minHeight: 140)
                     if caption.contains("[") {
                         Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
                     }
@@ -171,7 +186,7 @@ struct PostEditSheet: View {
                                 saving = true
                                 defer { saving = false }
                                 do {
-                                    try await posts.update(post, title: title, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
+                                    try await posts.update(current, title: title, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
                                     try await posts.postNow(id: post.id)
                                     dismiss()
                                 } catch {
@@ -183,7 +198,7 @@ struct PostEditSheet: View {
                         }
                         .disabled(saving)
                     } footer: {
-                        Text("Saves your caption and posts right away. Usually live within 1–3 minutes.")
+                        Text("Saves your changes and posts right away. Usually live within 1–3 minutes.")
                     }
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
@@ -198,7 +213,7 @@ struct PostEditSheet: View {
                             saving = true
                             defer { saving = false }
                             do {
-                                try await posts.update(post, title: title, publishAt: when, caption: caption, autoPost: autoPost)
+                                try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost)
                                 dismiss()
                             } catch {
                                 self.error = error.localizedDescription
@@ -213,6 +228,117 @@ struct PostEditSheet: View {
                 caption = post.caption
                 title = post.title
                 autoPost = post.state == .scheduled || post.state == .failed
+            }
+            // After re-editing the clip, pick up its new title and caption.
+            .onChange(of: current.caption) { _, v in caption = v }
+            .onChange(of: current.title) { _, v in title = v }
+        }
+    }
+}
+
+/// Plays a post's video (or shows its photos) from the server.
+struct PostMediaPreview: View {
+    let post: Post
+    @EnvironmentObject var posts: PostsStore
+    @State private var urls: [URL] = []
+    @State private var player: AVPlayer?
+    @State private var loaded = false
+
+    var body: some View {
+        Group {
+            if post.media.isEmpty {
+                placeholder(post.state == .posted ? "Posted. The file was removed from the server after posting." : "No media attached.")
+            } else if !loaded {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+            } else if urls.isEmpty {
+                placeholder("Couldn't load the preview.")
+            } else if post.media.first?.isVideo == true, let player {
+                VideoPlayer(player: player)
+                    .aspectRatio(9 / 16, contentMode: .fit)
+                    .frame(maxHeight: 420)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black)
+            } else {
+                TabView {
+                    ForEach(urls, id: \.self) { url in
+                        AsyncImage(url: url) { img in img.resizable().scaledToFit() } placeholder: { ProgressView() }
+                    }
+                }
+                .tabViewStyle(.page)
+                .frame(height: 380)
+                .background(Color.black)
+            }
+        }
+        .task(id: post.media.map(\.key).joined()) {
+            loaded = false
+            var list: [URL] = []
+            for m in post.media { if let u = await posts.previewURL(for: m) { list.append(u) } }
+            urls = list
+            if post.media.first?.isVideo == true, let first = list.first {
+                player = AVPlayer(url: first)
+            }
+            loaded = true
+        }
+        .onDisappear { player?.pause() }
+    }
+
+    private func placeholder(_ text: String) -> some View {
+        Text(text).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
+    }
+}
+
+/// Reopens a scheduled clip in the editor from its original video in Photos.
+struct ClipReeditView: View {
+    let post: Post
+    let plan: ClipPlan
+    @EnvironmentObject var posts: PostsStore
+    @State private var clip: ClipSuggestion
+    @State private var analysis: VideoAnalysis?
+    @State private var status = "Finding the original video…"
+    @State private var progress: Double?
+    @State private var failure: String?
+
+    init(post: Post, plan: ClipPlan) {
+        self.post = post
+        self.plan = plan
+        _clip = State(initialValue: plan.suggestion)
+    }
+
+    var body: some View {
+        Group {
+            if let analysis {
+                ClipEditorView(clip: $clip, analysis: analysis) { file, edited in
+                    let latest = posts.posts.first { $0.id == post.id } ?? post
+                    try await posts.replaceClip(latest, file: file, clip: edited, sourceAssetID: plan.assetId)
+                }
+            } else if let failure {
+                ContentUnavailableView {
+                    Label("Can't reopen this clip", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(failure)
+                }
+            } else {
+                VStack(spacing: 14) {
+                    if let progress { ProgressView(value: progress).frame(maxWidth: 240) } else { ProgressView() }
+                    Text(status).font(.headline)
+                    Text("Your trim, text and framing come back as you left them.").font(.footnote).foregroundStyle(.secondary)
+                }
+                .padding()
+            }
+        }
+        .navigationTitle(plan.title.isEmpty ? "Edit clip" : plan.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard analysis == nil, failure == nil else { return }
+            do {
+                let url = try await SourceVideo.load(assetId: plan.assetId)
+                var a = try await VideoAnalyzer.analyze(url: url) { p, label in
+                    Task { @MainActor in progress = p; status = label }
+                }
+                a.sourceAssetID = plan.assetId
+                analysis = a
+            } catch {
+                failure = error.localizedDescription
             }
         }
     }

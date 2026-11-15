@@ -6,6 +6,7 @@ final class ProjectModel: ObservableObject {
 
     let url: URL
     let useClaude: Bool
+    let assetID: String?
     @Published var phase: Phase = .analyzing
     @Published var progress: Double = 0
     @Published var progressLabel = "Getting ready…"
@@ -13,21 +14,23 @@ final class ProjectModel: ObservableObject {
     @Published var clips: [ClipSuggestion] = []
     @Published var note: String?
 
-    init(url: URL, useClaude: Bool) {
+    init(url: URL, useClaude: Bool, assetID: String?) {
         self.url = url
         self.useClaude = useClaude
+        self.assetID = assetID
     }
 
     func start() async {
         guard analysis == nil else { return }
         phase = .analyzing
         do {
-            let a = try await VideoAnalyzer.analyze(url: url) { [weak self] p, label in
+            var a = try await VideoAnalyzer.analyze(url: url) { [weak self] p, label in
                 Task { @MainActor in
                     self?.progress = p
                     self?.progressLabel = label
                 }
             }
+            a.sourceAssetID = assetID
             analysis = a
             if useClaude { await suggest() } else { onDevice() }
         } catch {
@@ -60,8 +63,8 @@ struct ProjectView: View {
     @StateObject private var model: ProjectModel
     @State private var showBatch = false
 
-    init(url: URL, useClaude: Bool) {
-        _model = StateObject(wrappedValue: ProjectModel(url: url, useClaude: useClaude))
+    init(url: URL, useClaude: Bool, assetID: String? = nil) {
+        _model = StateObject(wrappedValue: ProjectModel(url: url, useClaude: useClaude, assetID: assetID))
     }
 
     var body: some View {
