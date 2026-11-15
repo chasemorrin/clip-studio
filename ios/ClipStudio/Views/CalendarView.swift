@@ -236,22 +236,28 @@ struct PostEditSheet: View {
     }
 }
 
-/// Plays a post's video (or shows its photos) from the server.
+/// Plays a post's video (or shows its photos). Downloads the file to the phone first,
+/// which is more reliable than streaming it.
 struct PostMediaPreview: View {
     let post: Post
     @EnvironmentObject var posts: PostsStore
-    @State private var urls: [URL] = []
+    @State private var files: [URL] = []
     @State private var player: AVPlayer?
-    @State private var loaded = false
+    @State private var loading = false
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if post.media.isEmpty {
                 placeholder(post.state == .posted ? "Posted. The file was removed from the server after posting." : "No media attached.")
-            } else if !loaded {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 200)
-            } else if urls.isEmpty {
-                placeholder("Couldn't load the preview.")
+            } else if let failure {
+                placeholder("Couldn't load the preview: \(failure)")
+            } else if loading || files.isEmpty {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Loading preview…").font(.footnote).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else if post.media.first?.isVideo == true, let player {
                 VideoPlayer(player: player)
                     .aspectRatio(9 / 16, contentMode: .fit)
@@ -260,8 +266,12 @@ struct PostMediaPreview: View {
                     .background(Color.black)
             } else {
                 TabView {
-                    ForEach(urls, id: \.self) { url in
-                        AsyncImage(url: url) { img in img.resizable().scaledToFit() } placeholder: { ProgressView() }
+                    ForEach(files, id: \.self) { file in
+                        if let img = UIImage(contentsOfFile: file.path) {
+                            Image(uiImage: img).resizable().scaledToFit()
+                        } else {
+                            placeholder("This file can't be shown.")
+                        }
                     }
                 }
                 .tabViewStyle(.page)
@@ -269,21 +279,43 @@ struct PostMediaPreview: View {
                 .background(Color.black)
             }
         }
-        .task(id: post.media.map(\.key).joined()) {
-            loaded = false
-            var list: [URL] = []
-            for m in post.media { if let u = await posts.previewURL(for: m) { list.append(u) } }
-            urls = list
-            if post.media.first?.isVideo == true, let first = list.first {
-                player = AVPlayer(url: first)
-            }
-            loaded = true
-        }
+        .task(id: post.media.map(\.key).joined(separator: ",")) { await load() }
         .onDisappear { player?.pause() }
     }
 
+    private func load() async {
+        guard !post.media.isEmpty else { return }
+        loading = true
+        failure = nil
+        defer { loading = false }
+        var got: [URL] = []
+        for m in post.media {
+            guard let remote = await posts.previewURL(for: m) else {
+                failure = "the server didn't return a link (the file may have been removed)."
+                return
+            }
+            do {
+                let (tmp, response) = try await URLSession.shared.download(from: remote)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard code == 200 else { failure = "the server answered \(code)."; return }
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("preview-\(UUID().uuidString.prefix(8)).\(m.isVideo ? "mp4" : "jpg")")
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                got.append(dest)
+            } catch {
+                failure = error.localizedDescription
+                return
+            }
+        }
+        files = got
+        if post.media.first?.isVideo == true, let first = got.first {
+            player = AVPlayer(url: first)
+        }
+    }
+
     private func placeholder(_ text: String) -> some View {
-        Text(text).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
+        Text(text).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, minHeight: 80).padding(.horizontal)
     }
 }
 
