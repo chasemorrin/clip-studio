@@ -57,24 +57,29 @@ Sign in with Apple works once you're in the Apple Developer Program: uncomment t
 
 ## Connect Instagram (for auto-posting)
 
-Your Instagram must be a Creator or Business account. Meta renames dashboard screens now and then, so labels may differ slightly.
+Your Instagram must be a Creator or Business account. Newer Meta apps use **Unified login**, which goes through Facebook's login screen and gives a token that doesn't expire. Meta renames dashboard screens now and then, so labels may differ slightly.
 
-1. Go to developers.facebook.com, log in, and click **My Apps → Create app**. Name it `Clip Studio`. When asked for a use case, choose **Manage messaging & content on Instagram**.
-2. In the app's **Dashboard**, open that use case (**Customize**) and choose **API setup with Instagram login** in the left menu.
-3. Copy the **Instagram app ID** and **Instagram app secret** shown there.
-4. Under **Set up Instagram business login**, click **Set up** and add this **Redirect URL**:
-   `https://clip-studio.chasemorrin.workers.dev/instagram/callback`
-5. In **Business login settings**, also add:
-   - Deauthorize callback URL: `https://clip-studio.chasemorrin.workers.dev/instagram/deauthorize`
-   - Data deletion request URL: `https://clip-studio.chasemorrin.workers.dev/instagram/data-deletion`
-6. If the dashboard offers **Add account** under Generate access tokens, add your Instagram account there. If it asks you to add yourself as an **Instagram Tester** (App roles → Roles), do that and accept the invite in Instagram (Settings → Website permissions → Apps and websites → Tester invites).
-7. Put the ID and secret on the server, from the `server` folder:
-   - In `wrangler.toml`, set `IG_APP_ID = "your app id"`.
-   - `npx wrangler secret put IG_APP_SECRET` and paste the secret.
-   - `npx wrangler deploy`
-8. In the iPhone app: **Settings → Connect Instagram**.
+1. developers.facebook.com → **My Apps → Create app**, use case **Manage messaging & content on Instagram**.
+2. Connect a **business portfolio** when asked (free; create one under your name).
+3. Use case → **Customize** → **API setup with Unified login**.
+4. **Create new configuration**: system-user access token, Instagram account as the asset, permissions including `instagram_basic` and `instagram_content_publish`.
+5. **Redirect URL**: register `https://clip-studio.chasemorrin.workers.dev/instagram/callback` and save.
+6. Copy the **Login URL** Meta generates and paste it into `IG_LOGIN_URL` in `server/wrangler.toml`.
+7. App settings → Basic → **App secret** → `npx wrangler secret put IG_APP_SECRET` and paste it.
+8. From the `server` folder:
+   ```bash
+   npx wrangler d1 migrations apply clip-studio --remote
+   npx wrangler deploy
+   ```
+9. In the iPhone app: **Settings → Connect Instagram**, log in, and select your Instagram account.
 
-For your own account this works without Meta's app review. Other people's accounts need app review and business verification (App Store phase).
+Privacy callbacks for Meta (needed before publishing the app):
+- Deauthorize callback: `https://clip-studio.chasemorrin.workers.dev/instagram/deauthorize`
+- Data deletion request: `https://clip-studio.chasemorrin.workers.dev/instagram/data-deletion`
+
+Older apps with "API setup with Instagram login" also work: leave `IG_LOGIN_URL` empty and set `IG_APP_ID` to the Instagram app ID instead.
+
+For your own account no app review is needed. Other people's accounts need app review and business verification (App Store phase).
 
 ## Costs
 

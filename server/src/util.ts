@@ -5,6 +5,8 @@ export interface Env {
   APPLE_BUNDLE_ID: string;
   APP_URL_SCHEME: string;
   IG_APP_ID: string;
+  /** Unified login: the "Login URL" Meta generates for your configuration. When set, the server uses Unified login. */
+  IG_LOGIN_URL?: string;
   IG_API_VERSION: string;
   CLAUDE_MODEL: string;
   CLAUDE_MAX_TOKENS: string;
@@ -17,6 +19,7 @@ export interface Env {
   ANTHROPIC_BASE?: string;
   IG_GRAPH_BASE?: string;
   IG_OAUTH_BASE?: string;
+  FB_GRAPH_BASE?: string;
   APPLE_KEYS_URL?: string;
 }
 

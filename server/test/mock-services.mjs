@@ -46,6 +46,19 @@ export function start(port) {
     if (p === "/refresh_access_token") return send(res, 200, { access_token: "long-tok-refreshed", token_type: "bearer", expires_in: 5184000 });
     if (p === "/v25.0/me") return send(res, 200, { user_id: "1789", username: "chasemorrin_test" });
 
+    // Unified login (Facebook Login for Business with a configuration)
+    if (p === "/v25.0/oauth/access_token") {
+      const q = url.searchParams;
+      if (q.get("code") !== "good-code" || q.get("client_secret") !== "test-ig-secret" || q.get("client_id") !== "test-app") {
+        return send(res, 400, { error: { message: "bad code" } });
+      }
+      return send(res, 200, { access_token: "suat-tok", token_type: "bearer" });
+    }
+    if (p === "/v25.0/debug_token") {
+      return send(res, 200, { data: { granular_scopes: [{ scope: "instagram_basic", target_ids: ["1789"] }, { scope: "instagram_content_publish", target_ids: ["1789"] }] } });
+    }
+    if (p === "/v25.0/1789" && req.method === "GET") return send(res, 200, { id: "1789", username: "chasemorrin_test" });
+
     let m;
     if ((m = p.match(/^\/v25\.0\/1789\/media$/)) && req.method === "POST") {
       const q = url.searchParams;

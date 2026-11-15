@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import { start, appleToken, state, containers, log } from "./mock-services.mjs";
 
 const MOCK = 9911, PORT = 8799, BASE = `http://127.0.0.1:${PORT}`;
+// UNIFIED=1 tests Meta's Unified login (Facebook Login for Business) instead of Instagram login.
+const UNIFIED = process.env.UNIFIED === "1";
 const env = { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost", WRANGLER_SEND_METRICS: "false" };
 
 fs.writeFileSync(".dev.vars", [
@@ -20,12 +22,14 @@ fs.writeFileSync(".dev.vars", [
   `PUBLIC_URL=${BASE}`,
   "IG_APP_ID=test-ig-app",
   "CLAUDE_DAILY_LIMIT=3",
+  `FB_GRAPH_BASE=http://127.0.0.1:${MOCK}`,
+  ...(UNIFIED ? [`IG_LOGIN_URL=https://www.facebook.com/v25.0/dialog/oauth?client_id=test-app&redirect_uri=${encodeURIComponent(BASE + "/instagram/callback")}&config_id=cfg123&response_type=code`] : []),
 ].join("\n"));
 
 fs.rmSync(".wrangler/state", { recursive: true, force: true });
 execSync("npx wrangler d1 migrations apply clip-studio --local", { env, stdio: "pipe" });
 const mock = await start(MOCK);
-const dev = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--test-scheduled", "--ip", "127.0.0.1"], { env, stdio: ["ignore", "pipe", "pipe"] });
+const dev = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--test-scheduled", "--ip", "127.0.0.1"], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 let devOut = "";
 dev.stdout.on("data", (d) => (devOut += d));
 dev.stderr.on("data", (d) => (devOut += d));
@@ -113,7 +117,11 @@ try {
   await check("connect Instagram", async () => {
     const r = await api("GET", "/v1/instagram/connect");
     const u = new URL(r.json.url);
-    assert.equal(u.hostname, "www.instagram.com"); assert.match(u.searchParams.get("scope"), /instagram_business_content_publish/);
+    if (UNIFIED) {
+      assert.equal(u.hostname, "www.facebook.com"); assert.equal(u.searchParams.get("config_id"), "cfg123"); assert.ok(u.searchParams.get("state"));
+    } else {
+      assert.equal(u.hostname, "www.instagram.com"); assert.match(u.searchParams.get("scope"), /instagram_business_content_publish/);
+    }
     const cb = await api("GET", `/instagram/callback?code=good-code%23_&state=${u.searchParams.get("state")}`);
     assert.equal(cb.status, 302); const loc = cb.headers.get("location");
     assert.match(loc, /^clipstudio:\/\/instagram\?status=connected&username=chasemorrin_test/, loc);
@@ -181,7 +189,8 @@ try {
     sql(`UPDATE ig_accounts SET token_issued_at=${now - 50 * 86400}, expires_at=${now + 5 * 86400}`);
     await tick();
     const out = sql("SELECT access_token, expires_at FROM ig_accounts");
-    assert.match(out, /long-tok-refreshed/);
+    // Unified login tokens don't expire, so they're left alone.
+    assert.match(out, UNIFIED ? /suat-tok/ : /long-tok-refreshed/);
   });
 
   // Claude.
@@ -219,6 +228,8 @@ try {
   const failed = results.filter((r) => r.startsWith("FAIL")).length;
   console.log(`\n${results.length - failed} passed, ${failed} failed`);
   if (failed) console.log("\n--- server log (tail) ---\n" + devOut.split("\n").slice(-40).join("\n"));
-  dev.kill("SIGTERM"); mock.close();
+  console.log(UNIFIED ? "(mode: Unified login)" : "(mode: Instagram login)");
+  try { process.kill(-dev.pid, "SIGTERM"); } catch { dev.kill("SIGTERM"); } // stop wrangler and its workerd child
+  mock.close();
   setTimeout(() => process.exit(failed ? 1 : 0), 300);
 }

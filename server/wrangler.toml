@@ -25,6 +25,9 @@ APPLE_BUNDLE_ID = "com.chasemorrin.clipstudio"
 APP_URL_SCHEME = "clipstudio"
 # Instagram app ID from the Meta developer dashboard (Instagram > API setup with Instagram login).
 IG_APP_ID = ""
+# Unified login (Meta's login for newer apps): paste the "Login URL" Meta generates for your
+# configuration (Instagram use case > API setup with Unified login). Not secret.
+IG_LOGIN_URL = ""
 IG_API_VERSION = "v25.0"
 CLAUDE_MODEL = "claude-sonnet-5-5"
 CLAUDE_MAX_TOKENS = "4000"
