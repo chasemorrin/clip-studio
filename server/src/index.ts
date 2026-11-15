@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { Env, HttpError, hmacVerify, newId, nowSec, signedMediaUrl } from "./util";
+import { Env, HttpError, b64urlDecode, hmac, hmacVerify, newId, nowSec, signedMediaUrl } from "./util";
 import { createSession, readSession, userForAppleSub, verifyAppleToken } from "./auth";
 import { finishConnect, startConnect } from "./instagram";
 import { runPublisher } from "./publisher";
@@ -287,6 +287,37 @@ app.get("/instagram/callback", async (c) => {
     return back({ status: "error", message: e instanceof Error ? e.message : "Instagram connection failed." });
   }
 });
+
+/* ---------- Meta privacy callbacks ---------- */
+
+// Meta sends a signed_request when someone removes the app or asks for their data to be deleted.
+async function readSignedRequest(env: Env, c: any): Promise<{ user_id?: string } | null> {
+  const form = await c.req.parseBody().catch(() => ({}));
+  const sr = String((form as any).signed_request || "");
+  const [sig, payload] = sr.split(".");
+  if (!sig || !payload || !env.IG_APP_SECRET) return null;
+  const expected = await hmac(env.IG_APP_SECRET, payload);
+  if (expected !== sig.replace(/=+$/, "")) return null;
+  try { return JSON.parse(new TextDecoder().decode(b64urlDecode(payload))); } catch { return null; }
+}
+
+app.post("/instagram/deauthorize", async (c) => {
+  const data = await readSignedRequest(c.env, c);
+  if (!data?.user_id) return c.json({ error: "invalid request" }, 400);
+  await c.env.DB.prepare("DELETE FROM ig_accounts WHERE ig_user_id = ?").bind(String(data.user_id)).run();
+  return c.json({ ok: true });
+});
+
+app.post("/instagram/data-deletion", async (c) => {
+  const data = await readSignedRequest(c.env, c);
+  if (!data?.user_id) return c.json({ error: "invalid request" }, 400);
+  await c.env.DB.prepare("DELETE FROM ig_accounts WHERE ig_user_id = ?").bind(String(data.user_id)).run();
+  const code = newId("del_");
+  return c.json({ url: `${c.env.PUBLIC_URL}/instagram/deletion-status?code=${code}`, confirmation_code: code });
+});
+
+app.get("/instagram/deletion-status", (c) =>
+  c.text(`Deletion request ${c.req.query("code") || ""}: your Instagram connection and its access token have been deleted from Clip Studio.`));
 
 /* ---------- auto-posting ---------- */
 

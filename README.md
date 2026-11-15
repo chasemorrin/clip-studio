@@ -55,18 +55,24 @@ In Xcode:
 
 Sign in with Apple works once you're in the Apple Developer Program: uncomment the `applesignin` line in `ios/project.yml` and run `xcodegen` again.
 
-## Connect Instagram (when we get to auto-posting)
+## Connect Instagram (for auto-posting)
 
-Your Instagram must be a Creator or Business account.
+Your Instagram must be a Creator or Business account. Meta renames dashboard screens now and then, so labels may differ slightly.
 
-1. Go to developers.facebook.com → My Apps → Create app. Choose the use case for managing content on Instagram (Meta renames these screens now and then).
-2. In the app, open Instagram → API setup with Instagram login.
-3. Under Business login settings, add this OAuth redirect URI: `https://<your server>/instagram/callback`
-4. Add your own Instagram account as an Instagram tester, then accept the invite in the Instagram app (Settings → Website permissions → Apps and websites, or the tester invites screen).
-5. Copy the Instagram app ID and Instagram app secret:
-   - App ID → `IG_APP_ID` in `wrangler.toml`
-   - Secret → `npx wrangler secret put IG_APP_SECRET`
-6. `npx wrangler deploy`
+1. Go to developers.facebook.com, log in, and click **My Apps → Create app**. Name it `Clip Studio`. When asked for a use case, choose **Manage messaging & content on Instagram**.
+2. In the app's **Dashboard**, open that use case (**Customize**) and choose **API setup with Instagram login** in the left menu.
+3. Copy the **Instagram app ID** and **Instagram app secret** shown there.
+4. Under **Set up Instagram business login**, click **Set up** and add this **Redirect URL**:
+   `https://clip-studio.chasemorrin.workers.dev/instagram/callback`
+5. In **Business login settings**, also add:
+   - Deauthorize callback URL: `https://clip-studio.chasemorrin.workers.dev/instagram/deauthorize`
+   - Data deletion request URL: `https://clip-studio.chasemorrin.workers.dev/instagram/data-deletion`
+6. If the dashboard offers **Add account** under Generate access tokens, add your Instagram account there. If it asks you to add yourself as an **Instagram Tester** (App roles → Roles), do that and accept the invite in Instagram (Settings → Website permissions → Apps and websites → Tester invites).
+7. Put the ID and secret on the server, from the `server` folder:
+   - In `wrangler.toml`, set `IG_APP_ID = "your app id"`.
+   - `npx wrangler secret put IG_APP_SECRET` and paste the secret.
+   - `npx wrangler deploy`
+8. In the iPhone app: **Settings → Connect Instagram**.
 
 For your own account this works without Meta's app review. Other people's accounts need app review and business verification (App Store phase).
 

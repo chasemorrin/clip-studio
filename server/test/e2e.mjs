@@ -198,6 +198,17 @@ try {
     assert.equal(r.status, 429); assert.match(r.json.error.message, /today's limit/);
   });
 
+  await check("Meta deauthorize and data-deletion callbacks verify the signature and remove the connection", async () => {
+    const crypto = await import("node:crypto");
+    const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "1789" })).toString("base64url");
+    const sig = crypto.createHmac("sha256", "test-ig-secret").update(payload).digest("base64url");
+    const bad = await fetch(BASE + "/instagram/deauthorize", { method: "POST", body: new URLSearchParams({ signed_request: `AAAA.${payload}` }) });
+    assert.equal(bad.status, 400);
+    const r = await fetch(BASE + "/instagram/data-deletion", { method: "POST", body: new URLSearchParams({ signed_request: `${sig}.${payload}` }) });
+    const j = await r.json();
+    assert.match(j.confirmation_code, /^del_/); assert.match(j.url, /deletion-status/);
+    assert.equal((await api("GET", "/v1/me")).json.instagram, null);
+  });
   await check("delete account removes everything", async () => {
     assert.equal((await api("DELETE", "/v1/me")).json.deleted, true);
     assert.match(sql("SELECT COUNT(*) AS n FROM items"), /"n": 0/);
