@@ -1,3 +1,4 @@
+import Photos
 import AVKit
 import SwiftUI
 
@@ -146,6 +147,9 @@ struct PostEditSheet: View {
     @State private var autoPost = false
     @State private var saving = false
     @State private var error: String?
+    @State private var previewFiles: [URL] = []
+    @State private var savingToPhotos = false
+    @State private var savedToPhotos = false
 
     /// The latest copy from the server (it changes after re-editing the clip).
     private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
@@ -154,13 +158,14 @@ struct PostEditSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    PostMediaPreview(post: current)
+                    PostMediaPreview(post: current, files: $previewFiles)
                         .listRowInsets(EdgeInsets())
-                    if let plan = current.plan, current.isEditable {
+                    if current.isEditable, current.media.count == 1, current.media.first?.isVideo == true {
                         NavigationLink {
-                            ClipReeditView(post: current, plan: plan)
+                            ClipReeditView(post: current, plan: current.plan)
                         } label: {
-                            Label("Edit clip: trim, text and framing", systemImage: "scissors")
+                            Label(current.plan != nil ? "Edit clip: trim, text and framing" : "Edit video: trim and framing",
+                                  systemImage: "scissors")
                         }
                     }
                 }
@@ -202,6 +207,19 @@ struct PostEditSheet: View {
                         Text("Saves your changes and posts right away. Usually live within 1–3 minutes.")
                     }
                 }
+                if !current.media.isEmpty {
+                    Section {
+                        Button {
+                            Task { await saveToPhotos() }
+                        } label: {
+                            Label(savingToPhotos ? "Saving…" : savedToPhotos ? "Saved to Photos" : "Save to Photos",
+                                  systemImage: savedToPhotos ? "checkmark" : "square.and.arrow.down")
+                        }
+                        .disabled(savingToPhotos || savedToPhotos)
+                    } footer: {
+                        Text("Saves the \(current.media.count > 1 ? "photos" : current.media.first?.isVideo == true ? "video" : "photo") exactly as it will post.")
+                    }
+                }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }
             .navigationTitle("Edit post")
@@ -230,9 +248,55 @@ struct PostEditSheet: View {
                 title = post.title
                 autoPost = post.state == .scheduled || post.state == .failed
             }
+            .onChange(of: current.media.map(\.key)) { _, _ in savedToPhotos = false }
             // After re-editing the clip, pick up its new title and caption.
             .onChange(of: current.caption) { _, v in caption = v }
             .onChange(of: current.title) { _, v in title = v }
+        }
+    }
+}
+
+extension PostEditSheet {
+    func saveToPhotos() async {
+        savingToPhotos = true
+        defer { savingToPhotos = false }
+        do {
+            let files = previewFiles.count == current.media.count ? previewFiles : try await PostFiles.download(current, posts: posts)
+            for (file, m) in zip(files, current.media) {
+                try await PostFiles.saveToPhotos(file, isVideo: m.isVideo)
+            }
+            savedToPhotos = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Downloads a post's files to the phone, and saves them to Photos.
+enum PostFiles {
+    static func download(_ post: Post, posts: PostsStore) async throws -> [URL] {
+        var got: [URL] = []
+        for m in post.media {
+            let remote = try await posts.previewURL(for: m)
+            let (tmp, response) = try await URLSession.shared.download(from: remote)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard code == 200 else { throw APIError(code: "http_\(code)", message: "the server answered \(code).") }
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent("post-\(UUID().uuidString.prefix(8)).\(m.isVideo ? "mp4" : "jpg")")
+            try FileManager.default.moveItem(at: tmp, to: dest)
+            got.append(dest)
+        }
+        return got
+    }
+
+    static func saveToPhotos(_ file: URL, isVideo: Bool) async throws {
+        if isVideo { return try await ClipRenderer.saveToPhotos(file) }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            throw APIError(code: "photos_denied", message: "Clip Studio isn't allowed to save to Photos. Turn it on in Settings → Clip Studio → Photos.")
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetCreationRequest.creationRequestForAssetFromImage(atFileURL: file)
         }
     }
 }
@@ -241,8 +305,8 @@ struct PostEditSheet: View {
 /// which is more reliable than streaming it.
 struct PostMediaPreview: View {
     let post: Post
+    @Binding var files: [URL]
     @EnvironmentObject var posts: PostsStore
-    @State private var files: [URL] = []
     @State private var player: AVPlayer?
     @State private var loading = false
     @State private var failure: String?
@@ -289,21 +353,12 @@ struct PostMediaPreview: View {
         loading = true
         failure = nil
         defer { loading = false }
-        var got: [URL] = []
-        for m in post.media {
-            do {
-                let remote = try await posts.previewURL(for: m)
-                let (tmp, response) = try await URLSession.shared.download(from: remote)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard code == 200 else { failure = "the server answered \(code)."; return }
-                let dest = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("preview-\(UUID().uuidString.prefix(8)).\(m.isVideo ? "mp4" : "jpg")")
-                try FileManager.default.moveItem(at: tmp, to: dest)
-                got.append(dest)
-            } catch {
-                failure = error.localizedDescription
-                return
-            }
+        let got: [URL]
+        do {
+            got = try await PostFiles.download(post, posts: posts)
+        } catch {
+            failure = error.localizedDescription
+            return
         }
         files = got
         if post.media.first?.isVideo == true, let first = got.first {
@@ -317,33 +372,44 @@ struct PostMediaPreview: View {
     }
 }
 
-/// Reopens a scheduled clip in the editor from its original video in Photos.
+/// Reopens a scheduled video in the editor: from its original video in Photos when the app knows it
+/// (trim, text and framing come back as you left them), otherwise from the scheduled video itself.
 struct ClipReeditView: View {
     let post: Post
-    let plan: ClipPlan
+    let plan: ClipPlan?
     @EnvironmentObject var posts: PostsStore
     @State private var clip: ClipSuggestion
     @State private var analysis: VideoAnalysis?
-    @State private var status = "Finding the original video…"
+    @State private var status: String
     @State private var progress: Double?
     @State private var failure: String?
 
-    init(post: Post, plan: ClipPlan) {
+    init(post: Post, plan: ClipPlan?) {
         self.post = post
         self.plan = plan
-        _clip = State(initialValue: plan.suggestion)
+        var c = plan?.suggestion ?? ClipSuggestion(start: 0, end: 1, title: post.title, why: "", onScreenText: "",
+                                                   caption: post.caption, hashtags: [])
+        if plan == nil { c.framing = Framing(zoom: 1) }
+        _clip = State(initialValue: c)
+        _status = State(initialValue: plan != nil ? "Finding the original video…" : "Downloading the video…")
     }
 
     var body: some View {
-        ZStack {  // a real container, so .task below runs once instead of restarting whenever the content switches
+        ZStack {  // a real container, so .task below runs once
             if let analysis {
-                ClipEditorView(clip: $clip, analysis: analysis) { file, edited in
-                    let latest = posts.posts.first { $0.id == post.id } ?? post
-                    try await posts.replaceClip(latest, file: file, clip: edited, sourceAssetID: plan.assetId)
+                VStack(spacing: 0) {
+                    if plan == nil {
+                        Text("Editing the scheduled video. Its on-screen text is already part of the picture.")
+                            .font(.caption).foregroundStyle(.secondary).padding(.horizontal).padding(.top, 6)
+                    }
+                    ClipEditorView(clip: $clip, analysis: analysis) { file, edited in
+                        let latest = posts.posts.first { $0.id == post.id } ?? post
+                        try await posts.replaceClip(latest, file: file, clip: edited, sourceAssetID: plan?.assetId)
+                    }
                 }
             } else if let failure {
                 ContentUnavailableView {
-                    Label("Can't reopen this clip", systemImage: "exclamationmark.triangle")
+                    Label("Can't reopen this video", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(failure)
                 }
@@ -351,21 +417,36 @@ struct ClipReeditView: View {
                 VStack(spacing: 14) {
                     if let progress { ProgressView(value: progress).frame(maxWidth: 240) } else { ProgressView() }
                     Text(status).font(.headline)
-                    Text("Your trim, text and framing come back as you left them.").font(.footnote).foregroundStyle(.secondary)
+                    Text(plan != nil ? "Your trim, text and framing come back as you left them." : "This post doesn't know its original video, so you'll edit the scheduled one.")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding()
             }
         }
-        .navigationTitle(plan.title.isEmpty ? "Edit clip" : plan.title)
+        .navigationTitle(post.title.isEmpty ? "Edit video" : post.title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             guard analysis == nil, failure == nil else { return }
             do {
-                let url = try await SourceVideo.load(assetId: plan.assetId)
-                var a = try await VideoAnalyzer.analyze(url: url) { p, label in
+                let url: URL
+                if let plan {
+                    url = try await SourceVideo.load(assetId: plan.assetId)
+                } else {
+                    guard let first = try await PostFiles.download(post, posts: posts).first else {
+                        throw APIError(code: "missing", message: "This post has no video.")
+                    }
+                    url = first
+                }
+                var a = try await VideoAnalyzer.analyze(url: url, minimumDuration: 1, requireAudio: false) { p, label in
                     Task { @MainActor in progress = p; status = label }
                 }
-                a.sourceAssetID = plan.assetId
+                a.sourceAssetID = plan?.assetId
+                if plan == nil {
+                    clip.start = 0
+                    clip.end = a.duration
+                } else {
+                    clip.end = min(clip.end, a.duration)
+                }
                 analysis = a
             } catch {
                 failure = error.localizedDescription

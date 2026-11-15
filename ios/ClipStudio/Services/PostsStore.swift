@@ -144,14 +144,14 @@ final class PostsStore: ObservableObject {
     }
 
     /// Replaces a scheduled clip's video after re-editing it, and removes the old file.
-    func replaceClip(_ post: Post, file: URL, clip: ClipSuggestion, sourceAssetID: String) async throws {
+    func replaceClip(_ post: Post, file: URL, clip: ClipSuggestion, sourceAssetID: String?) async throws {
         let media = try await APIClient.shared.upload(file: file)
         var body: [String: Any] = [
             "title": clip.title,
             "caption": clip.fullCaption,
             "media": [["key": media.key, "type": media.type]],
         ]
-        if let plan = ClipPlan(clip: clip, assetId: sourceAssetID).json { body["plan"] = plan }
+        if let sourceAssetID, let plan = ClipPlan(clip: clip, assetId: sourceAssetID).json { body["plan"] = plan }
         try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
         for old in post.media where old.key != media.key {
             _ = try? await APIClient.shared.request("DELETE", "v1/media/\(old.key)")
