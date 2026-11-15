@@ -140,6 +140,7 @@ struct PostEditSheet: View {
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
     @State private var when = Date()
+    @State private var earliest = Date()
     @State private var title = ""
     @State private var caption = ""
     @State private var autoPost = false
@@ -167,7 +168,7 @@ struct PostEditSheet: View {
                     TextField("Title", text: $title)
                 }
                 Section {
-                    DatePicker("Post on", selection: $when, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    DatePicker("Post on", selection: $when, in: earliest..., displayedComponents: [.date, .hourAndMinute])
                     Toggle("Post to Instagram automatically", isOn: $autoPost)
                         .disabled(session.instagramUsername == nil)
                 } footer: {
@@ -290,11 +291,8 @@ struct PostMediaPreview: View {
         defer { loading = false }
         var got: [URL] = []
         for m in post.media {
-            guard let remote = await posts.previewURL(for: m) else {
-                failure = "the server didn't return a link (the file may have been removed)."
-                return
-            }
             do {
+                let remote = try await posts.previewURL(for: m)
                 let (tmp, response) = try await URLSession.shared.download(from: remote)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else { failure = "the server answered \(code)."; return }

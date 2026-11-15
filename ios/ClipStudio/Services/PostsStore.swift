@@ -160,9 +160,12 @@ final class PostsStore: ObservableObject {
     }
 
     /// A temporary link to preview a post's file.
-    func previewURL(for media: MediaRef) async -> URL? {
-        guard let r = try? await APIClient.shared.request("GET", "v1/media-url/\(media.key)"), let s = r["url"] as? String else { return nil }
-        return URL(string: s)
+    func previewURL(for media: MediaRef) async throws -> URL {
+        let r = try await APIClient.shared.request("GET", "v1/media-url/\(media.key)")
+        guard let s = r["url"] as? String, let url = URL(string: s) else {
+            throw APIError(code: "bad_response", message: "the server's answer didn't include a link")
+        }
+        return url
     }
 
     /// Puts already-uploaded media on the calendar. Returns the new post's id.

@@ -76,7 +76,7 @@ async function step(env: Env, row: Row): Promise<void> {
       return update(env, row.id, { post_attempts: row.post_attempts + 1 });
     }
     const p = await publishContainer(env, acct, row.ig_container_id);
-    await update(env, row.id, { post_state: "posted", status: "posted", ig_media_id: p.id, ig_permalink: p.permalink || null, post_error: null });
+    await update(env, row.id, { post_state: "posted", status: "posted", ig_media_id: p.id, ig_permalink: p.permalink || null, post_error: null, media: "[]" });
     // The file has done its job; free the storage.
     for (const m of media) {
       await env.MEDIA.delete(m.key);

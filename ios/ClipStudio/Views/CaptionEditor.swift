@@ -1,3 +1,4 @@
+import UIKit
 import SwiftUI
 
 /// A friend or collaborator you tag often.
@@ -29,32 +30,90 @@ enum FriendHandles {
     }
 }
 
+/// A plain UIKit text view, so the app always knows where the cursor is and can move it.
+struct CaptionTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var cursor: Int            // UTF-16 offset of the cursor
+    @Binding var pendingCursor: Int?    // set to move the cursor after inserting a handle
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let v = UITextView()
+        v.font = .preferredFont(forTextStyle: .body)
+        v.adjustsFontForContentSizeCategory = true
+        v.backgroundColor = .clear
+        v.textContainerInset = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        v.textContainer.lineFragmentPadding = 0
+        v.autocapitalizationType = .sentences
+        v.delegate = context.coordinator
+        v.text = text
+        return v
+    }
+
+    func updateUIView(_ v: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if v.text != text { v.text = text }
+        if let p = pendingCursor {
+            let loc = min(p, (v.text as NSString).length)
+            v.selectedRange = NSRange(location: loc, length: 0)
+            DispatchQueue.main.async {
+                pendingCursor = nil
+                cursor = loc
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: CaptionTextView
+        init(_ parent: CaptionTextView) { self.parent = parent }
+
+        func textViewDidChange(_ v: UITextView) {
+            let t = v.text ?? ""
+            let c = v.selectedRange.location
+            // Update SwiftUI after this UIKit callback finishes, never during a view update.
+            DispatchQueue.main.async {
+                if self.parent.text != t { self.parent.text = t }
+                if self.parent.cursor != c { self.parent.cursor = c }
+            }
+        }
+
+        func textViewDidChangeSelection(_ v: UITextView) {
+            let c = v.selectedRange.location
+            DispatchQueue.main.async {
+                if self.parent.cursor != c { self.parent.cursor = c }
+            }
+        }
+    }
+}
+
 /// A caption box that suggests your saved handles as you type "@", like Instagram does.
 struct CaptionEditor: View {
     @Binding var text: String
     var minHeight: CGFloat = 120
 
     @AppStorage(FriendHandles.storageKey) private var handlesJSON = "[]"
-    @State private var selection: TextSelection?
+    @State private var cursor = 0
+    @State private var pendingCursor: Int?
 
     private var handles: [FriendHandle] { FriendHandles.decode(handlesJSON) }
 
-    /// The "@partial" word the cursor is in, if any.
-    private var mention: (range: Range<String.Index>, query: String)? {
-        guard let selection, case .selection(let r) = selection.indices else { return nil }
-        let cursor = r.upperBound
-        guard cursor >= text.startIndex, cursor <= text.endIndex else { return nil }
-        var i = cursor
-        while i > text.startIndex {
-            let prev = text.index(before: i)
-            let ch = text[prev]
-            if ch == "@" {
-                // Only at the start of a word, so emails don't trigger it.
-                if prev > text.startIndex, !text[text.index(before: prev)].isWhitespace { return nil }
-                return (prev..<cursor, String(text[text.index(after: prev)..<cursor]).lowercased())
+    /// The "@partial" word right before the cursor, as a UTF-16 range plus what's typed after the @.
+    private var mention: (range: NSRange, query: String)? {
+        let ns = text as NSString
+        let end = min(cursor, ns.length)
+        guard end > 0 else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._"))
+        var i = end
+        while i > 0 {
+            let unit = ns.character(at: i - 1)
+            if unit == 64 { // "@"
+                if i - 1 > 0, let s = UnicodeScalar(ns.character(at: i - 2)), !CharacterSet.whitespacesAndNewlines.contains(s) { return nil }
+                let range = NSRange(location: i - 1, length: end - (i - 1))
+                return (range, ns.substring(with: NSRange(location: i, length: end - i)).lowercased())
             }
-            guard ch.isLetter || ch.isNumber || ch == "." || ch == "_" else { return nil }
-            i = prev
+            guard let s = UnicodeScalar(unit), allowed.contains(s), end - i < 31 else { return nil }
+            i -= 1
         }
         return nil
     }
@@ -63,14 +122,14 @@ struct CaptionEditor: View {
         guard let m = mention else { return [] }
         let q = m.query
         return Array(handles
-            .filter { q.isEmpty || $0.handle.hasPrefix(q) || $0.name.lowercased().contains(q) || $0.handle.contains(q) }
+            .filter { q.isEmpty || $0.handle.contains(q) || $0.name.lowercased().contains(q) }
             .sorted { ($0.handle.hasPrefix(q) ? 0 : 1, $0.handle) < ($1.handle.hasPrefix(q) ? 0 : 1, $1.handle) }
             .prefix(8))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextEditor(text: $text, selection: $selection)
+            CaptionTextView(text: $text, cursor: $cursor, pendingCursor: $pendingCursor)
                 .frame(minHeight: minHeight)
             if !suggestions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -101,10 +160,8 @@ struct CaptionEditor: View {
     private func insert(_ h: FriendHandle) {
         guard let m = mention else { return }
         let replacement = "@\(h.handle) "
-        let offset = text.distance(from: text.startIndex, to: m.range.lowerBound)
-        text.replaceSubrange(m.range, with: replacement)
-        let cursor = text.index(text.startIndex, offsetBy: min(text.count, offset + replacement.count))
-        selection = TextSelection(insertionPoint: cursor)
+        text = (text as NSString).replacingCharacters(in: m.range, with: replacement)
+        pendingCursor = m.range.location + (replacement as NSString).length
     }
 }
 
