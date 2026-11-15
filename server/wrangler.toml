@@ -27,7 +27,7 @@ APP_URL_SCHEME = "clipstudio"
 IG_APP_ID = ""
 # Unified login (Meta's login for newer apps): paste the "Login URL" Meta generates for your
 # configuration (Instagram use case > API setup with Unified login). Not secret.
-IG_LOGIN_URL = ""
+IG_LOGIN_URL = "https://www.facebook.com/dialog/oauth?client_id=1154015520859418&config_id=1666157758492888&display=popup&override_default_response_type=true&redirect_uri=https%3A%2F%2Fclip-studio.chasemorrin.workers.dev%2Finstagram%2Fcallback&response_type=code&state=%3CSTATE%3E&prompt=login"
 IG_API_VERSION = "v25.0"
 CLAUDE_MODEL = "claude-sonnet-5-5"
 CLAUDE_MAX_TOKENS = "4000"
