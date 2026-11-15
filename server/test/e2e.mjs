@@ -128,6 +128,12 @@ try {
     assert.match(loc, /^clipstudio:\/\/instagram\?status=connected&username=chasemorrin_test/, loc);
     assert.equal((await api("GET", "/v1/me")).json.instagram.username, "chasemorrin_test");
   });
+  await check("connect with a pasted access token", async () => {
+    assert.equal((await api("POST", "/v1/instagram/token", { token: "short" })).status, 400);
+    const r = await api("POST", "/v1/instagram/token", { token: "IGAA-pasted-token-from-dashboard-123456" });
+    assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.username, "chasemorrin_test");
+    assert.equal((await api("GET", "/v1/me")).json.instagram.username, "chasemorrin_test");
+  });
   await check("reused Instagram login link is refused", async () => {
     const r = await api("GET", "/v1/instagram/connect"); const st = new URL(r.json.url).searchParams.get("state");
     await api("GET", `/instagram/callback?code=good-code&state=${st}`);

@@ -97,6 +97,12 @@ async function finishUnified(env: Env, userId: string, code: string): Promise<{ 
   })}`);
   const token: string = tok.access_token;
   if (!token) throw new HttpError(502, "ig_failed", "Meta didn't return a login. Try again.");
+  return saveFacebookToken(env, userId, token, clientId, tok.expires_in);
+}
+
+/** Saves a Facebook-graph token (Unified login or system user) after finding its Instagram account. */
+async function saveFacebookToken(env: Env, userId: string, token: string, clientId: string, expiresIn?: number): Promise<{ username: string }> {
+  const v = env.IG_API_VERSION;
 
   // Which Instagram account did the person share? Meta reports it in different places depending on
   // how the app and the account are owned, so try each one and keep a short note of what we found.
@@ -159,7 +165,7 @@ async function finishUnified(env: Env, userId: string, code: string): Promise<{ 
   } catch { /* the name is nice to have, not required */ }
 
   const now = nowSec();
-  const expiresAt = tok.expires_in ? now + Number(tok.expires_in) : now + 10 * 365 * 86400; // system-user tokens don't expire
+  const expiresAt = expiresIn ? now + Number(expiresIn) : now + 10 * 365 * 86400; // system-user tokens don't expire
   await env.DB.prepare(
     `INSERT INTO ig_accounts (user_id, ig_user_id, username, access_token, token_issued_at, expires_at, updated_at, kind)
      VALUES (?, ?, ?, ?, ?, ?, ?, 'facebook')
@@ -167,6 +173,53 @@ async function finishUnified(env: Env, userId: string, code: string): Promise<{ 
        token_issued_at=excluded.token_issued_at, expires_at=excluded.expires_at, updated_at=excluded.updated_at, kind='facebook'`
   ).bind(userId, igUserId, username || null, token, now, expiresAt, now).run();
   return { username };
+}
+
+/**
+ * Connect with an access token copied from Meta's dashboard (API setup > Generate access tokens).
+ * Works for your own account without the login screen. Accepts Instagram-login tokens and Facebook-graph tokens.
+ */
+export async function connectWithToken(env: Env, userId: string, raw: string): Promise<{ username: string }> {
+  const token = String(raw || "").trim().replace(/^Bearer\s+/i, "");
+  if (token.length < 20 || /\s/.test(token)) {
+    throw new HttpError(400, "bad_token", "That doesn't look like an access token. Copy the whole token from Meta's dashboard and paste it again.");
+  }
+  const v = env.IG_API_VERSION;
+
+  // Instagram-login tokens (usually start with "IG") work on graph.instagram.com.
+  let me: any = null;
+  try {
+    me = await igFetch(`${graph(env)}/${v}/me?${new URLSearchParams({ fields: "user_id,username", access_token: token })}`);
+  } catch (e) {
+    console.log("token isn't an Instagram-login token", String(e));
+  }
+  const igUserId = me ? String(me.user_id || me.id || "") : "";
+  if (igUserId) {
+    let finalToken = token;
+    let expiresIn = 60 * 86400;
+    try {
+      // Renew right away when allowed, which also tells us the real expiry.
+      const r = await igFetch(`${graph(env)}/refresh_access_token?${new URLSearchParams({ grant_type: "ig_refresh_token", access_token: token })}`);
+      if (r.access_token) { finalToken = r.access_token; expiresIn = Number(r.expires_in || expiresIn); }
+    } catch { /* new tokens can't be renewed for 24 hours; the timer renews it later */ }
+    const now = nowSec();
+    await env.DB.prepare(
+      `INSERT INTO ig_accounts (user_id, ig_user_id, username, access_token, token_issued_at, expires_at, updated_at, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'instagram')
+       ON CONFLICT(user_id) DO UPDATE SET ig_user_id=excluded.ig_user_id, username=excluded.username, access_token=excluded.access_token,
+         token_issued_at=excluded.token_issued_at, expires_at=excluded.expires_at, updated_at=excluded.updated_at, kind='instagram'`
+    ).bind(userId, igUserId, me.username || null, finalToken, now, now + expiresIn, now).run();
+    return { username: me.username || "" };
+  }
+
+  // Otherwise treat it as a Facebook-graph token (Unified login / system user).
+  const clientId = (env.IG_LOGIN_URL ? new URL(env.IG_LOGIN_URL).searchParams.get("client_id") : "") || env.IG_APP_ID;
+  try {
+    return await saveFacebookToken(env, userId, token, clientId);
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(400, "bad_token", "Meta didn't accept that token. Generate a new one in Meta's dashboard and paste it again.");
+  }
 }
 
 export interface IgAccount { user_id: string; ig_user_id: string; username: string | null; access_token: string; token_issued_at: number; expires_at: number; kind?: string; }

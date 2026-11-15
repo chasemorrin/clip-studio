@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var confirmDisconnect = false
     @State private var error: String?
     @State private var instagramError: String?
+    @State private var showTokenSheet = false
     @State private var connector = InstagramConnector()
 
     // Calendar weekday numbers in Monday-first order (1 = Sunday).
@@ -32,6 +33,7 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(connecting)
+                        Button("Connect with an access token…") { showTokenSheet = true }
                     }
                 } header: {
                     Text("Instagram")
@@ -101,6 +103,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showTokenSheet) { TokenConnectSheet() }
             .task { await session.refreshProfile() }
             .confirmationDialog("Disconnect Instagram?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
@@ -144,5 +147,54 @@ struct SettingsView: View {
 
     static func timeFromMinutes(_ m: Int) -> Date {
         Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+    }
+}
+
+/// For your own account: paste an access token generated in Meta's dashboard.
+struct TokenConnectSheet: View {
+    @EnvironmentObject var session: SessionStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var token = ""
+    @State private var working = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Paste the access token", text: $token, axis: .vertical)
+                        .lineLimit(3...8)
+                        .font(.footnote.monospaced())
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Paste from clipboard") { token = UIPasteboard.general.string ?? "" }
+                } footer: {
+                    Text("In Meta's dashboard: your app → Instagram use case → API setup → Generate access tokens → Add account. Copy the token it shows and paste it here. It's sent only to your Clip Studio server.")
+                }
+                if let error { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("Connect with a token")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(working ? "Connecting…" : "Connect") {
+                        Task {
+                            working = true
+                            error = nil
+                            defer { working = false }
+                            do {
+                                try await APIClient.shared.request("POST", "v1/instagram/token", json: ["token": token])
+                                await session.refreshProfile()
+                                dismiss()
+                            } catch {
+                                self.error = error.localizedDescription
+                            }
+                        }
+                    }
+                    .disabled(working || token.trimmingCharacters(in: .whitespacesAndNewlines).count < 20)
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { Env, HttpError, b64urlDecode, hmac, hmacVerify, newId, nowSec, signedMediaUrl } from "./util";
 import { createSession, readSession, userForAppleSub, verifyAppleToken } from "./auth";
-import { finishConnect, startConnect } from "./instagram";
+import { connectWithToken, finishConnect, startConnect } from "./instagram";
 import { runPublisher } from "./publisher";
 
 type Vars = { uid: string };
@@ -304,6 +304,13 @@ app.post("/v1/claude", async (c) => {
 /* ---------- Instagram connection ---------- */
 
 app.get("/v1/instagram/connect", async (c) => c.json({ url: await startConnect(c.env, c.get("uid")) }));
+
+// For your own account: paste an access token from Meta's dashboard instead of logging in.
+app.post("/v1/instagram/token", async (c) => {
+  const { token } = await c.req.json<{ token: string }>();
+  const r = await connectWithToken(c.env, c.get("uid"), token);
+  return c.json({ connected: true, username: r.username });
+});
 
 app.post("/v1/instagram/disconnect", async (c) => {
   await c.env.DB.prepare("DELETE FROM ig_accounts WHERE user_id = ?").bind(c.get("uid")).run();
