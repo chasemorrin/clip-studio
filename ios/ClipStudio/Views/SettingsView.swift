@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var confirmDelete = false
     @State private var confirmDisconnect = false
     @State private var error: String?
+    @State private var instagramError: String?
     @State private var connector = InstagramConnector()
 
     // Calendar weekday numbers in Monday-first order (1 = Sunday).
@@ -35,7 +36,12 @@ struct SettingsView: View {
                 } header: {
                     Text("Instagram")
                 } footer: {
-                    Text("Needed for automatic posting. Your account must be a Creator or Business account.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let instagramError {
+                            Text(instagramError).foregroundStyle(.red)
+                        }
+                        Text("Needed for automatic posting. Your account must be a Creator or Business account.")
+                    }
                 }
 
                 Section {
@@ -122,15 +128,17 @@ struct SettingsView: View {
 
     private func connectInstagram() async {
         connecting = true
-        error = nil
+        instagramError = nil
         defer { connecting = false }
         do {
             _ = try await connector.connect()
             await session.refreshProfile()
         } catch let e as APIError where e.code == "cancelled" {
             // The person closed the login sheet; nothing to report.
+        } catch let e as APIError where e.code == "not_configured" {
+            instagramError = "Instagram isn't set up on the server yet. Create the Meta app and add its ID and secret to the server (README: Connect Instagram), then try again."
         } catch {
-            self.error = error.localizedDescription
+            instagramError = error.localizedDescription
         }
     }
 
