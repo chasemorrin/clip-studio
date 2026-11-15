@@ -6,6 +6,12 @@ import AVFoundation
 enum InstagramEncoder {
     static let videoBitrate = 8_000_000
 
+    /// 8 Mbps normally; lower for long videos so the file stays under the 95 MB upload limit.
+    static func bitrate(forDuration seconds: Double) -> Int {
+        let budget = 88.0 * 1024 * 1024 * 8 / max(1, seconds) - 128_000
+        return Int(max(2_000_000, min(Double(videoBitrate), budget)))
+    }
+
     enum EncodeError: LocalizedError {
         case noVideo, failed(String)
         var errorDescription: String? {
@@ -18,7 +24,7 @@ enum InstagramEncoder {
 
     private final class Done: @unchecked Sendable { var value = false }
 
-    static func encode(_ input: URL, to output: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
+    static func encode(_ input: URL, to output: URL, bitrate: Int? = nil, progress: @escaping @Sendable (Double) -> Void) async throws {
         let asset = AVURLAsset(url: input)
         let rawDuration = try await asset.load(.duration).seconds
         let duration = max(0.1, rawDuration)
@@ -61,7 +67,7 @@ enum InstagramEncoder {
                 AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
             ],
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: videoBitrate,
+                AVVideoAverageBitRateKey: bitrate ?? self.bitrate(forDuration: duration),
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoMaxKeyFrameIntervalKey: 60,
                 AVVideoExpectedSourceFrameRateKey: 30,

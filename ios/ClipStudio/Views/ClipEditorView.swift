@@ -124,6 +124,12 @@ struct ClipEditorView: View {
                 trimRow(label: "End", value: $clip.end, isStart: false)
 
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Title").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("Title for your calendar", text: $clip.title)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
                     Text("On-screen text").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     TextField("Leave empty for no text", text: $clip.onScreenText)
                         .textFieldStyle(.roundedBorder)

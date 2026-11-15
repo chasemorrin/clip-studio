@@ -101,6 +101,93 @@ enum ClipRenderer {
         return out
     }
 
+    /// A finished video imported as is: whole length, original shape and framing, no text, no fades.
+    /// Only converted to standard color and Instagram's format (and scaled down if it's larger than Instagram allows).
+    static func renderAsIs(source: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        let asset = AVURLAsset(url: source)
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw RenderError.cantRead }
+        let audioTrack = try await asset.loadTracks(withMediaType: .audio).first
+        let duration = try await asset.load(.duration)
+        let range = CMTimeRange(start: .zero, duration: duration)
+
+        let comp = AVMutableComposition()
+        guard let compVideo = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw RenderError.cantRead }
+        try compVideo.insertTimeRange(range, of: videoTrack, at: .zero)
+        if let audioTrack, let t = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            try t.insertTimeRange(range, of: audioTrack, at: .zero)
+        }
+
+        let natural = try await videoTrack.load(.naturalSize)
+        let preferred = try await videoTrack.load(.preferredTransform)
+        let rect = CGRect(origin: .zero, size: natural).applying(preferred)
+        let w = abs(rect.width), h = abs(rect.height)
+        let maxWidth: CGFloat = h > w ? 1080 : 1920
+        let scale = min(1, maxWidth / w)
+        let even = { (v: CGFloat) -> CGFloat in CGFloat(Int((v * scale).rounded()) / 2 * 2) }
+        let size = CGSize(width: even(w), height: even(h))
+        let transform = preferred
+            .concatenating(CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: comp.duration)
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideo)
+        layer.setTransform(transform, at: .zero)
+        instruction.layerInstructions = [layer]
+        let video = AVMutableVideoComposition()
+        video.renderSize = size
+        video.frameDuration = CMTime(value: 1, timescale: 30)
+        video.instructions = [instruction]
+        video.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        video.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        video.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+
+        guard let session = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { throw RenderError.cantExport }
+        session.videoComposition = video
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("stage-\(UUID().uuidString.prefix(8)).mp4")
+        let watcher = Task {
+            for await state in session.states(updateInterval: 0.25) {
+                if case .exporting(let p) = state { progress(p.fractionCompleted * 0.6) }
+            }
+        }
+        try await session.export(to: stage, as: .mp4)
+        watcher.cancel()
+        defer { try? FileManager.default.removeItem(at: stage) }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("post-\(UUID().uuidString.prefix(8)).mp4")
+        try await InstagramEncoder.encode(stage, to: out, bitrate: InstagramEncoder.bitrate(forDuration: duration.seconds)) { p in progress(0.6 + p * 0.4) }
+        progress(1)
+        return out
+    }
+
+    /// Photos for Instagram: JPEG, at most 1440 px wide, and within Instagram's allowed shapes
+    /// (from 4:5 tall to 1.91:1 wide). Photos outside that get black bars instead of being cropped.
+    static func instagramJPEG(from image: UIImage) -> Data? {
+        let w = image.size.width, h = image.size.height
+        guard w > 0, h > 0 else { return nil }
+        let ratio = w / h
+        var canvas = CGSize(width: w, height: h)
+        if ratio < 0.8 { canvas.width = h * 0.8 }
+        if ratio > 1.91 { canvas.height = w / 1.91 }
+        let scale = min(1, 1440 / canvas.width)
+        let out = CGSize(width: (canvas.width * scale).rounded(), height: (canvas.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let img = UIGraphicsImageRenderer(size: out, format: format).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: out))
+            let dw = w * scale, dh = h * scale
+            image.draw(in: CGRect(x: (out.width - dw) / 2, y: (out.height - dh) / 2, width: dw, height: dh))
+        }
+        return img.jpegData(compressionQuality: 0.9)
+    }
+
+    /// True if Instagram would need bars added to this photo.
+    static func needsBars(_ image: UIImage) -> Bool {
+        let r = image.size.width / max(1, image.size.height)
+        return r < 0.8 || r > 1.91
+    }
+
     /// Renders a suggestion with its trim, text and framing.
     static func render(clip: ClipSuggestion, analysis: VideoAnalysis, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         try await render(source: analysis.url, start: clip.start, end: clip.end, text: clip.onScreenText,

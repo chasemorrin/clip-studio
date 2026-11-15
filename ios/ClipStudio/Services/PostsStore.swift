@@ -126,21 +126,35 @@ final class PostsStore: ObservableObject {
     @discardableResult
     func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool) async throws -> String {
         let media = try await APIClient.shared.upload(file: file)
+        return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why, format: "reel",
+                                media: [media], at: date, autoPost: autoPost)
+    }
+
+    /// Puts already-uploaded media on the calendar. Returns the new post's id.
+    @discardableResult
+    func create(title: String, caption: String, notes: String = "", format: String,
+                media: [(key: String, type: String)], at date: Date, autoPost: Bool) async throws -> String {
         var body: [String: Any] = [
-            "title": clip.title,
+            "title": title,
             "pillar": "live",
-            "format": "reel",
+            "format": format,
             "status": "edited",
-            "notes": clip.why,
-            "caption": clip.fullCaption,
+            "notes": notes,
+            "caption": caption,
             "date": PostingSchedule.dayKey(date),
             "publishAt": Int(date.timeIntervalSince1970),
-            "media": [["key": media.key, "type": media.type]],
+            "media": media.map { ["key": $0.key, "type": $0.type] },
         ]
         if autoPost { body["autoPost"] = true }
         let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""
+    }
+
+    /// True while something is posting or due within two minutes, so the Calendar should check often.
+    var somethingIsHappening: Bool {
+        let soon = Date().addingTimeInterval(120)
+        return posts.contains { $0.state == .posting || ($0.state == .scheduled && ($0.publishAt ?? .distantFuture) <= soon) }
     }
 
     /// Start publishing right away instead of waiting for the scheduled time.
@@ -153,8 +167,9 @@ final class PostsStore: ObservableObject {
         do { try await postNow(id: post.id) } catch { self.error = error.localizedDescription }
     }
 
-    func update(_ post: Post, publishAt: Date, caption: String, autoPost: Bool) async throws {
+    func update(_ post: Post, title: String, publishAt: Date, caption: String, autoPost: Bool) async throws {
         var body: [String: Any] = [
+            "title": title,
             "publishAt": Int(publishAt.timeIntervalSince1970),
             "date": PostingSchedule.dayKey(publishAt),
             "caption": caption,

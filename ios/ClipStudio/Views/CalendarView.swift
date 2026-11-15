@@ -68,10 +68,11 @@ struct CalendarView: View {
             .navigationTitle("Calendar")
             .refreshable { await posts.refresh() }
             .task {
-                // Keep statuses fresh while this screen is open.
+                // Keep statuses fresh while this screen is open: every few seconds while
+                // something is posting (or about to), otherwise every 30 seconds.
                 while !Task.isCancelled {
                     await posts.refresh()
-                    try? await Task.sleep(for: .seconds(60))
+                    try? await Task.sleep(for: .seconds(posts.somethingIsHappening ? 4 : 30))
                 }
             }
             .sheet(item: $editing) { post in PostEditSheet(post: post) }
@@ -138,6 +139,7 @@ struct PostEditSheet: View {
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
     @State private var when = Date()
+    @State private var title = ""
     @State private var caption = ""
     @State private var autoPost = false
     @State private var saving = false
@@ -146,6 +148,9 @@ struct PostEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Title") {
+                    TextField("Title", text: $title)
+                }
                 Section {
                     DatePicker("Post on", selection: $when, in: Date()..., displayedComponents: [.date, .hourAndMinute])
                     Toggle("Post to Instagram automatically", isOn: $autoPost)
@@ -166,7 +171,7 @@ struct PostEditSheet: View {
                                 saving = true
                                 defer { saving = false }
                                 do {
-                                    try await posts.update(post, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
+                                    try await posts.update(post, title: title, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
                                     try await posts.postNow(id: post.id)
                                     dismiss()
                                 } catch {
@@ -183,7 +188,7 @@ struct PostEditSheet: View {
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }
-            .navigationTitle(post.title.isEmpty ? "Post" : post.title)
+            .navigationTitle("Edit post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -193,7 +198,7 @@ struct PostEditSheet: View {
                             saving = true
                             defer { saving = false }
                             do {
-                                try await posts.update(post, publishAt: when, caption: caption, autoPost: autoPost)
+                                try await posts.update(post, title: title, publishAt: when, caption: caption, autoPost: autoPost)
                                 dismiss()
                             } catch {
                                 self.error = error.localizedDescription
@@ -206,6 +211,7 @@ struct PostEditSheet: View {
             .onAppear {
                 when = max(post.publishAt ?? Date(), Date().addingTimeInterval(120))
                 caption = post.caption
+                title = post.title
                 autoPost = post.state == .scheduled || post.state == .failed
             }
         }

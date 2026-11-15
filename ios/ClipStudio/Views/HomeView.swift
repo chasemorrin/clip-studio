@@ -31,6 +31,9 @@ struct HomeView: View {
     @State private var loading = false
     @State private var error: String?
     @AppStorage("useClaude") private var useClaude = true
+    @State private var manualPicks: [PhotosPickerItem] = []
+    @State private var manual: ManualImport?
+    @State private var loadingManual = false
 
     var body: some View {
         NavigationStack {
@@ -67,7 +70,16 @@ struct HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(loading)
-                if loading { ProgressView() }
+                PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
+                    Label(loadingManual ? "Opening…" : "Import finished post", systemImage: "square.and.arrow.down.on.square")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
+                .disabled(loading || loadingManual)
+                Text("Manual: post your own photos or a finished video as is, then add a title, caption and time.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                if loading || loadingManual { ProgressView() }
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
                 }
@@ -77,6 +89,16 @@ struct HomeView: View {
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude) }
+            .navigationDestination(item: $manual) { m in ManualPostView(items: m.items) }
+            .onChange(of: manualPicks) { _, picks in
+                guard !picks.isEmpty else { return }
+                Task {
+                    loadingManual = true
+                    error = nil
+                    defer { loadingManual = false; manualPicks = [] }
+                    do { manual = try await ManualImport.load(picks) } catch { self.error = error.localizedDescription }
+                }
+            }
             .onChange(of: pick) { _, item in
                 guard let item else { return }
                 Task { await load(item) }
