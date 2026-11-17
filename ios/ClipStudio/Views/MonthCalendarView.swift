@@ -9,25 +9,25 @@ struct MonthCalendarView: View {
     @State private var selectedDay: Date? = Calendar.current.startOfDay(for: Date())
     @State private var dropTarget: Date?
     @State private var moveError: String?
+    @State private var pagePost: String?
 
     private let cal = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
-    private let maxChips = 3
+    private let maxChips = 2
+    private let cellHeight: CGFloat = 54
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if let error = posts.error {
-                    Text(error).foregroundStyle(.red).font(.footnote).padding(.horizontal).padding(.bottom, 6)
-                }
-                header
-                weekdayRow
-                grid
-                Divider().padding(.top, 4)
-                selectedDayList
+        VStack(spacing: 0) {
+            if let error = posts.error {
+                Text(error).foregroundStyle(.red).font(.caption).lineLimit(2).padding(.horizontal).padding(.bottom, 4)
             }
+            header
+            weekdayRow
+            grid
+            Divider().padding(.top, 2)
+            selectedDayList
+                .frame(maxHeight: .infinity, alignment: .top)
         }
-        .refreshable { await posts.refresh() }
         .alert("Can't move that post", isPresented: Binding(get: { moveError != nil }, set: { if !$0 { moveError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -39,12 +39,12 @@ struct MonthCalendarView: View {
 
     private var header: some View {
         HStack {
-            Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left").padding(8) }
+            Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left").padding(6) }
             Spacer()
             Text(month.formatted(.dateTime.month(.wide).year()))
-                .font(.title3.weight(.semibold))
+                .font(.headline)
             Spacer()
-            Button { shiftMonth(1) } label: { Image(systemName: "chevron.right").padding(8) }
+            Button { shiftMonth(1) } label: { Image(systemName: "chevron.right").padding(6) }
         }
         .overlay(alignment: .trailing) {
             if !cal.isDate(month, equalTo: Date(), toGranularity: .month) || selectedDay == nil {
@@ -57,7 +57,6 @@ struct MonthCalendarView: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.top, 4)
     }
 
     private var weekdayRow: some View {
@@ -69,7 +68,7 @@ struct MonthCalendarView: View {
                 Text(s).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
     }
 
     // MARK: Grid
@@ -98,7 +97,7 @@ struct MonthCalendarView: View {
                 if let day {
                     dayCell(day, posts: byDay[day] ?? [])
                 } else {
-                    Color.clear.frame(height: 84)
+                    Color.clear.frame(height: cellHeight)
                 }
             }
         }
@@ -116,7 +115,7 @@ struct MonthCalendarView: View {
                 .font(.caption.weight(isToday ? .bold : .regular))
                 .monospacedDigit()
                 .foregroundStyle(isToday ? Color.white : isPast ? Color.secondary : Color.primary)
-                .frame(width: 22, height: 22)
+                .frame(width: 20, height: 20)
                 .background(Circle().fill(isToday ? Theme.accent : Color.clear))
                 .frame(maxWidth: .infinity)
             ForEach(dayPosts.prefix(dayPosts.count > maxChips ? maxChips - 1 : maxChips)) { post in
@@ -125,13 +124,14 @@ struct MonthCalendarView: View {
             if dayPosts.count > maxChips {
                 Text("+\(dayPosts.count - (maxChips - 1)) more")
                     .font(.system(size: 9, weight: .medium))
+                    .lineLimit(1)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
             Spacer(minLength: 0)
         }
         .padding(2)
-        .frame(height: 84, alignment: .top)
+        .frame(height: cellHeight, alignment: .top)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -157,7 +157,7 @@ struct MonthCalendarView: View {
             .font(.system(size: 10, weight: .medium))
             .lineLimit(1)
             .padding(.horizontal, 3)
-            .padding(.vertical, 2)
+            .padding(.vertical, 1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .foregroundStyle(post.state.color)
             .background(post.state.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
@@ -182,21 +182,48 @@ struct MonthCalendarView: View {
     private var selectedDayList: some View {
         if let day = selectedDay, cal.isDate(day, equalTo: month, toGranularity: .month) {
             let dayPosts = postsByDay[cal.startOfDay(for: day)] ?? []
-            VStack(alignment: .leading, spacing: 10) {
-                Text(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(.headline)
-                if dayPosts.isEmpty {
-                    Text("Nothing on this day.").font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if dayPosts.count > 1 {
+                        let n = (dayPosts.firstIndex { $0.id == pagePost } ?? 0) + 1
+                        Label("\(n) of \(dayPosts.count)", systemImage: "chevron.up.chevron.down")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                ForEach(dayPosts) { post in
-                    PostRow(post: post)
-                        .padding(12)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                        .contentShape(Rectangle())
-                        .onTapGesture { if post.isEditable { editing = post } }
+                .padding(.horizontal)
+                if dayPosts.isEmpty {
+                    Text("Nothing on this day.").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
+                } else {
+                    // One post per page: swipe up or down to snap to the next.
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(dayPosts) { post in
+                                PostRow(post: post)
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { if post.isEditable { editing = post } }
+                                    .padding(.horizontal)
+                                    .frame(maxHeight: .infinity, alignment: .top)
+                                    .containerRelativeFrame(.vertical)
+                                    .id(post.id)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.paging)
+                    .scrollIndicators(.hidden)
+                    .scrollPosition(id: $pagePost)
+                    .id(cal.startOfDay(for: day))  // start at the first post when the day changes
                 }
             }
-            .padding()
+            .padding(.top, 8)
+            .onChange(of: selectedDay) { _, _ in pagePost = nil }
         } else {
             Text("Tap a day to see its posts. Long-press a post and drag it to another day to move it.")
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
