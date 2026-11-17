@@ -106,6 +106,7 @@ struct SettingsView: View {
                     if let error { Text(error).foregroundStyle(.red) }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings")
             .sheet(isPresented: $showTokenSheet) { TokenConnectSheet() }
             .task { await session.refreshProfile() }

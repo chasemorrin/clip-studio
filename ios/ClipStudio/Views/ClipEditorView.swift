@@ -173,6 +173,7 @@ struct ClipEditorView: View {
             }
             .padding()
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(clip.title)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { looper.load(url: analysis.url, start: clip.start, end: clip.end) }

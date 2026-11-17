@@ -222,6 +222,7 @@ struct PostEditSheet: View {
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Edit post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
