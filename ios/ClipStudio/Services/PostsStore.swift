@@ -235,6 +235,31 @@ final class PostsStore: ObservableObject {
         await refresh()
     }
 
+    /// Moves a post to another day, keeping its time of day. Shows the move right away,
+    /// then saves it (and puts it back if saving fails).
+    func move(_ post: Post, toDay day: Date) async throws {
+        guard let old = post.publishAt else { return }
+        let cal = Calendar.current
+        let time = cal.dateComponents([.hour, .minute, .second], from: old)
+        guard let new = cal.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: time.second ?? 0,
+                                 of: cal.startOfDay(for: day)) else { return }
+        guard !cal.isDate(new, inSameDayAs: old) else { return }
+        if let i = posts.firstIndex(where: { $0.id == post.id }) {
+            posts[i].publishAt = new
+            posts[i].date = PostingSchedule.dayKey(new)
+        }
+        do {
+            try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: [
+                "publishAt": Int(new.timeIntervalSince1970),
+                "date": PostingSchedule.dayKey(new),
+            ])
+        } catch {
+            await refresh()
+            throw error
+        }
+        await refresh()
+    }
+
     func setAutoPost(_ post: Post, _ on: Bool) async {
         do {
             try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: ["autoPost": on])

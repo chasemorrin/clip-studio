@@ -19,8 +19,41 @@ struct CalendarView: View {
         return grouped.keys.sorted().map { DayGroup(day: $0, posts: grouped[$0] ?? []) }
     }
 
+    enum Mode: String, CaseIterable { case list = "List", month = "Month" }
+    @AppStorage("calendarMode") private var mode: Mode = .list
+
     var body: some View {
         NavigationStack {
+            Group {
+                switch mode {
+                case .list: listView
+                case .month: MonthCalendarView(editing: $editing)
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Picker("View", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.bar)
+            }
+            .navigationTitle("Calendar")
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                // Keep statuses fresh while this screen is open: every few seconds while
+                // something is posting (or about to), otherwise every 30 seconds.
+                while !Task.isCancelled {
+                    await posts.refresh()
+                    try? await Task.sleep(for: .seconds(posts.somethingIsHappening ? 4 : 30))
+                }
+            }
+            .sheet(item: $editing) { post in PostEditSheet(post: post) }
+        }
+    }
+
+    private var listView: some View {
             List {
                 if let error = posts.error {
                     Section { Text(error).foregroundStyle(.red).font(.footnote) }
@@ -67,18 +100,7 @@ struct CalendarView: View {
                     }
                 }
             }
-            .navigationTitle("Calendar")
             .refreshable { await posts.refresh() }
-            .task {
-                // Keep statuses fresh while this screen is open: every few seconds while
-                // something is posting (or about to), otherwise every 30 seconds.
-                while !Task.isCancelled {
-                    await posts.refresh()
-                    try? await Task.sleep(for: .seconds(posts.somethingIsHappening ? 4 : 30))
-                }
-            }
-            .sheet(item: $editing) { post in PostEditSheet(post: post) }
-        }
     }
 }
 
