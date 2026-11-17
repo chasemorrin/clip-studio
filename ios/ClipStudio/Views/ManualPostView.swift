@@ -49,6 +49,7 @@ struct ManualPostView: View {
     @EnvironmentObject var session: SessionStore
     @State private var title = ""
     @State private var caption = ""
+    @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var autoPost = true
     @State private var working: String?
@@ -119,8 +120,11 @@ struct ManualPostView: View {
                     CaptionEditor(text: $caption, minHeight: 120)
                 } header: {
                     Text("Caption")
+                }
+                Section {
+                    HashtagField(text: $hashtags)
                 } footer: {
-                    Text("Add hashtags at the end of the caption.")
+                    Text("Added at the end of the caption.")
                 }
                 Section {
                     DatePicker("Post on", selection: $when, in: Date()..., displayedComponents: [.date, .hourAndMinute])
@@ -195,7 +199,7 @@ struct ManualPostView: View {
             }
             working = postNow ? "Sending to Instagram…" : "Scheduling…"
             let at = postNow ? Date() : when
-            let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: caption, format: format,
+            let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
                                             media: media, at: at, autoPost: postNow || (autoPost && instagramConnected))
             if postNow { try await posts.postNow(id: id) }
             finished = postNow ? "Posting to Instagram now" : "Scheduled for \(at.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"

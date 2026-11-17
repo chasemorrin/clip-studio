@@ -143,6 +143,7 @@ struct PhotoPostView: View {
     @State private var current = 0
     @State private var title = ""
     @State private var caption = ""
+    @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var earliest = Date()
     @State private var autoPost = true
@@ -220,6 +221,7 @@ struct PhotoPostView: View {
                             .padding(6)
                             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                     }
+                    HashtagField(text: $hashtags)
                     VStack(alignment: .leading, spacing: 8) {
                         DatePicker("Post on", selection: $when, in: earliest..., displayedComponents: [.date, .hourAndMinute])
                         Toggle("Post to Instagram automatically", isOn: $autoPost).disabled(!instagramConnected)
@@ -286,7 +288,7 @@ struct PhotoPostView: View {
             }
             working = postNow ? "Sending to Instagram…" : "Scheduling…"
             let at = postNow ? Date() : when
-            let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: caption,
+            let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: DefaultHashtags.caption(caption, tags: hashtags),
                                             format: images.count > 1 ? "carousel" : "photo",
                                             media: media, at: at, autoPost: postNow || (autoPost && instagramConnected))
             if postNow { try await posts.postNow(id: id) }

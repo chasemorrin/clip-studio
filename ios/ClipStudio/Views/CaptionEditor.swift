@@ -222,3 +222,76 @@ struct FriendHandlesSection: View {
         if problem == nil { newHandle = ""; newName = "" }
     }
 }
+
+/// Hashtags added to every new post, set in Settings.
+enum DefaultHashtags {
+    static let storageKey = "defaultHashtags"
+
+    static var text: String { UserDefaults.standard.string(forKey: storageKey) ?? "" }
+    static var list: [String] { parse(text) }
+
+    /// "#jazz, piano #livemusic" → ["jazz", "piano", "livemusic"], without repeats.
+    static func parse(_ s: String) -> [String] {
+        var seen = Set<String>()
+        return s.components(separatedBy: CharacterSet(charactersIn: " ,\n\t#"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// ["jazz", "piano"] → "#jazz #piano"
+    static func format(_ tags: [String]) -> String { tags.map { "#" + $0 }.joined(separator: " ") }
+
+    /// Caption with hashtags on their own lines at the end, as Instagram will show it.
+    static func caption(_ caption: String, tags: String) -> String {
+        let t = format(parse(tags))
+        let c = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return c }
+        return c.isEmpty ? t : "\(c)\n\n\(t)"
+    }
+}
+
+struct DefaultHashtagsSection: View {
+    @AppStorage(DefaultHashtags.storageKey) private var tags = ""
+
+    var body: some View {
+        Section {
+            TextField("#jazz #jazzpiano #livemusic", text: $tags, axis: .vertical)
+                .lineLimit(2...6)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        } header: {
+            Text("Default hashtags")
+        } footer: {
+            Text("Added to every new post. When Claude picks its own hashtags, the editor has a button to switch to these.")
+        }
+    }
+}
+
+/// An editable hashtag field with a button to switch to your defaults.
+struct HashtagField: View {
+    @Binding var text: String
+    var label = "Hashtags"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                let defaults = DefaultHashtags.list
+                if !defaults.isEmpty && DefaultHashtags.parse(text).map({ $0.lowercased() }) != defaults.map({ $0.lowercased() }) {
+                    Menu("Use my defaults") {
+                        Button("Replace with my defaults") { text = DefaultHashtags.format(defaults) }
+                        Button("Add my defaults") { text = DefaultHashtags.format(DefaultHashtags.parse(text + " " + DefaultHashtags.text)) }
+                    }
+                    .font(.footnote)
+                }
+            }
+            TextField("#jazz #piano", text: $text, axis: .vertical)
+                .lineLimit(1...5)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}

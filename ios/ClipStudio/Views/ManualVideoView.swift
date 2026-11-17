@@ -42,6 +42,7 @@ struct ManualVideoView: View {
                 }
                 a.sourceAssetID = assetID
                 var whole = ClipSuggestion(start: 0, end: a.duration, title: "", why: "", onScreenText: "", caption: "", hashtags: [])
+                whole.hashtags = DefaultHashtags.list
                 whole.framing = Framing(zoom: 1)   // no zoom: the whole picture
                 whole.fromClaude = false
                 whole.keep = true

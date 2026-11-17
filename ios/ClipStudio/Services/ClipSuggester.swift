@@ -42,6 +42,8 @@ enum ClipSuggester {
         - On-screen text: minimal and lowercase, like "piano solo, live" or "the trio, with dancers". Use an empty string if the music should speak for itself.
         - Captions: short and human, in the style of Danilo Pérez or Sullivan Fortner. Use [brackets] for anything you can't know, like the tune, venue, date or band members. Never invent names or places.
 
+        - Hashtags: \(DefaultHashtags.list.isEmpty ? "pick 8–12 that fit the clip." : "his usual hashtags are \(DefaultHashtags.format(DefaultHashtags.list)). Keep the ones that fit this clip and add a few specific to it (instrument, style, setting), 8–12 in all.")
+
         Reply with only JSON, no other text:
         {"clips":[{"start":seconds,"end":seconds,"title":"short name for the moment","why":"one sentence on why it works","onScreenText":"","caption":"","hashtags":["8–12 tags without #"]}]}
         """
@@ -114,9 +116,15 @@ enum ClipSuggester {
                                   why: c["why"] as? String ?? "",
                                   onScreenText: c["onScreenText"] as? String ?? "",
                                   caption: c["caption"] as? String ?? "",
-                                  hashtags: (c["hashtags"] as? [String]) ?? [])
+                                  hashtags: hashtags(c["hashtags"]))
         }
         .sorted { $0.start < $1.start }
+    }
+
+    /// Claude's hashtags, or your defaults if it didn't give any.
+    private static func hashtags(_ value: Any?) -> [String] {
+        let tags = DefaultHashtags.parse((value as? [String] ?? []).joined(separator: " "))
+        return tags.isEmpty ? DefaultHashtags.list : tags
     }
 
     /// Used when Claude can't be reached: the busiest stretches, cut on breaths.
@@ -136,7 +144,7 @@ enum ClipSuggester {
         }
         return picks.sorted { $0.0 < $1.0 }.enumerated().map { i, p in
             ClipSuggestion(start: p.0, end: p.1, title: "Busy stretch \(i + 1)", why: "One of the most active passages, cut on breaths.",
-                           onScreenText: "", caption: "[Tune], live at [venue].", hashtags: [], fromClaude: false)
+                           onScreenText: "", caption: "[Tune], live at [venue].", hashtags: DefaultHashtags.list, fromClaude: false)
         }
     }
 }

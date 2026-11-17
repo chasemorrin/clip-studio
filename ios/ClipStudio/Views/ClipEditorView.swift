@@ -81,6 +81,7 @@ struct ClipEditorView: View {
     @State private var saved = false
 
     @State private var showSchedule = false
+    @State private var hashtagText = ""
 
     /// The finished file, kept on the clip so scheduling can reuse it.
     private var output: URL? {
@@ -153,14 +154,14 @@ struct ClipEditorView: View {
                     CaptionEditor(text: $clip.caption, minHeight: 90)
                         .padding(6)
                         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                    if !clip.hashtags.isEmpty {
-                        Text(clip.hashtags.map { "#\($0)" }.joined(separator: " "))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                     if clip.caption.contains("[") {
                         Text("Fill in the [brackets] before posting.").font(.caption).foregroundStyle(.orange)
                     }
                 }
+
+                HashtagField(text: $hashtagText)
+                    .onAppear { hashtagText = DefaultHashtags.format(clip.hashtags) }
+                    .onChange(of: hashtagText) { _, t in clip.hashtags = DefaultHashtags.parse(t) }
 
                 Toggle("Keep this clip", isOn: $clip.keep)
 
