@@ -11,6 +11,7 @@ struct ClipStudioApp: App {
                 .environmentObject(session)
                 .environmentObject(posts)
                 .tint(Theme.accent)
+                .onAppear { KeyboardDismiss.install() }
         }
     }
 }

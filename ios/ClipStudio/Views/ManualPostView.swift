@@ -161,6 +161,7 @@ struct ManualPostView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Finished post")
         .navigationBarTitleDisplayMode(.inline)
         .interactiveDismissDisabled(working != nil)

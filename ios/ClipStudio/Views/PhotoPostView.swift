@@ -255,6 +255,7 @@ struct PhotoPostView: View {
             }
             .padding()
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(images.count > 1 ? "Carousel" : "Photo")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
