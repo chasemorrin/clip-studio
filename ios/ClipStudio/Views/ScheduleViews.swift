@@ -13,6 +13,7 @@ struct ScheduleSheet: View {
     @State private var when = Date().addingTimeInterval(3600)
     @State private var nextSlot: Date?
     @State private var autoPost = true
+    @State private var pushBack = false
     @State private var working: String?
     @State private var progress: Double?
     @State private var error: String?
@@ -35,6 +36,7 @@ struct ScheduleSheet: View {
                 } footer: {
                     Text("Starts at your next open posting day. Change your posting days and time in Settings.")
                 }
+                PushBackSection(day: when, isOn: $pushBack)
                 Section {
                     Toggle("Post to Instagram automatically", isOn: $autoPost)
                         .disabled(!instagramConnected)
@@ -113,6 +115,9 @@ struct ScheduleSheet: View {
             if postNow {
                 working = "Sending to Instagram…"
                 try await posts.postNow(id: id)
+            } else if pushBack {
+                working = "Moving the other posts back…"
+                await posts.pushBackAfterScheduling(true, day: at, newID: id)
             }
             clip.scheduledFor = at
             clip.keep = true
@@ -120,6 +125,70 @@ struct ScheduleSheet: View {
         } catch {
             self.error = error.localizedDescription
             working = nil
+        }
+    }
+}
+
+/// Shown when the chosen day already has a post: lists it and offers to push it (and any post
+/// in the way) back to the next open posting slot.
+struct PushBackSection: View {
+    let day: Date
+    var excluding: String? = nil
+    @Binding var isOn: Bool
+    /// True outside a Form: draws the same rows in a plain stack.
+    var plain = false
+    @EnvironmentObject var posts: PostsStore
+
+    var body: some View {
+        let others = posts.conflicts(on: day, excluding: excluding)
+        if !others.isEmpty {
+            if plain {
+                VStack(alignment: .leading, spacing: 8) {
+                    header(others.count).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    rows(others)
+                    footer.font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                Section {
+                    rows(others)
+                } header: {
+                    header(others.count)
+                } footer: {
+                    footer
+                }
+            }
+        }
+    }
+
+    private func header(_ count: Int) -> Text {
+        Text(count == 1 ? "Already scheduled this day" : "\(count) already scheduled this day")
+    }
+
+    private var footer: Text {
+        Text(isOn
+             ? "Each moves to your next open posting slot, and any post in the way moves along too."
+             : "Turn on to give this day to this post and move the others later.")
+    }
+
+    @ViewBuilder
+    private func rows(_ others: [Post]) -> some View {
+        ForEach(others) { p in
+            LabeledContent(p.title.isEmpty ? "Untitled" : p.title,
+                           value: p.publishAt?.formatted(date: .omitted, time: .shortened) ?? "")
+        }
+        Toggle("Push scheduled posts back", isOn: $isOn)
+        if isOn {
+            ForEach(posts.pushBackPlan(from: day, excluding: excluding)) { m in
+                HStack {
+                    Text(m.post.title.isEmpty ? "Untitled" : m.post.title).lineLimit(1)
+                    Spacer()
+                    Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                    Text(m.to.formatted(whenFormat)).foregroundStyle(.secondary)
+                }
+                .font(.footnote)
+            }
         }
     }
 }

@@ -260,6 +260,71 @@ final class PostsStore: ObservableObject {
         await refresh()
     }
 
+    /// Upcoming posts already on this day (not yet posted), leaving out one post (the one being edited).
+    func conflicts(on day: Date, excluding id: String? = nil) -> [Post] {
+        upcoming.filter { p in
+            p.id != id && p.state != .posted && p.publishAt.map { Calendar.current.isDate($0, inSameDayAs: day) } == true
+        }
+    }
+
+    struct PushMove: Identifiable {
+        let post: Post
+        let to: Date
+        var id: String { post.id }
+    }
+
+    /// What happens if a new post takes `day`: the posts on that day move to the next open posting slot,
+    /// and any post in the way moves along too, so every post keeps its own day and its order.
+    func pushBackPlan(from day: Date, excluding id: String? = nil) -> [PushMove] {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        let later = upcoming.filter { $0.id != id && ($0.publishAt ?? .distantPast) >= start }
+        var taken: Set<String> = [PostingSchedule.dayKey(day)]
+        // Posts that are publishing right now stay put; keep their days free of others.
+        for p in later where !p.isEditable { if let at = p.publishAt { taken.insert(PostingSchedule.dayKey(at)) } }
+        var moves: [PushMove] = []
+        for p in later where p.isEditable {
+            guard let at = p.publishAt else { continue }
+            let key = PostingSchedule.dayKey(at)
+            if taken.contains(key) {
+                guard let slot = PostingSchedule.nextSlots(1, taken: taken, after: max(at, Date())).first else { continue }
+                taken.insert(PostingSchedule.dayKey(slot))
+                moves.append(PushMove(post: p, to: slot))
+            } else {
+                taken.insert(key)
+            }
+        }
+        return moves
+    }
+
+    /// After a new post is saved on `day`: pushes the others back if asked. A failure here is shown
+    /// on the Calendar rather than thrown, because the new post itself did get scheduled.
+    func pushBackAfterScheduling(_ on: Bool, day: Date, newID: String) async {
+        guard on, !conflicts(on: day, excluding: newID).isEmpty else { return }
+        do {
+            try await pushBack(from: day, excluding: newID)
+        } catch {
+            self.error = "Your post is scheduled, but moving the other posts back didn't finish: \(error.localizedDescription)"
+        }
+    }
+
+    /// Applies `pushBackPlan`.
+    func pushBack(from day: Date, excluding id: String? = nil) async throws {
+        let moves = pushBackPlan(from: day, excluding: id)
+        do {
+            for m in moves {
+                try await APIClient.shared.request("PATCH", "v1/items/\(m.post.id)", json: [
+                    "publishAt": Int(m.to.timeIntervalSince1970),
+                    "date": PostingSchedule.dayKey(m.to),
+                ])
+            }
+        } catch {
+            await refresh()
+            throw error
+        }
+        await refresh()
+    }
+
     func setAutoPost(_ post: Post, _ on: Bool) async {
         do {
             try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: ["autoPost": on])

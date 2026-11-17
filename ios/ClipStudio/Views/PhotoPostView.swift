@@ -147,6 +147,7 @@ struct PhotoPostView: View {
     @State private var when = Date().addingTimeInterval(3600)
     @State private var earliest = Date()
     @State private var autoPost = true
+    @State private var pushBack = false
     @State private var working: String?
     @State private var error: String?
     @State private var finished: String?
@@ -229,6 +230,7 @@ struct PhotoPostView: View {
                             Text("Connect Instagram in Settings to post automatically.").font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    PushBackSection(day: when, isOn: $pushBack, plain: true)
                     VStack(spacing: 10) {
                         Button {
                             Task { await run(postNow: false) }
@@ -292,7 +294,7 @@ struct PhotoPostView: View {
             let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: DefaultHashtags.caption(caption, tags: hashtags),
                                             format: images.count > 1 ? "carousel" : "photo",
                                             media: media, at: at, autoPost: postNow || (autoPost && instagramConnected))
-            if postNow { try await posts.postNow(id: id) }
+            if postNow { try await posts.postNow(id: id) } else { await posts.pushBackAfterScheduling(pushBack, day: at, newID: id) }
             finished = postNow ? "Posting to Instagram now" : "Scheduled for \(at.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
         } catch {
             self.error = error.localizedDescription

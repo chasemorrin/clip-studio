@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A month grid of posts. Tap a post to edit it; long-press and drag it to move it to another day.
+/// A month grid of posts. Tap a day to list its posts below (tap one there to edit it);
+/// long-press a post in the grid and drag it to move it to another day.
 struct MonthCalendarView: View {
     @Binding var editing: Post?
     @EnvironmentObject var posts: PostsStore
@@ -161,10 +162,6 @@ struct MonthCalendarView: View {
             .foregroundStyle(post.state.color)
             .background(post.state.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
             .contentShape(Rectangle())
-            .onTapGesture {
-                selectedDay = post.publishAt.map { cal.startOfDay(for: $0) }
-                if post.isEditable { editing = post }
-            }
         if post.isEditable {
             base.draggable(post.id) {
                 Text(post.title.isEmpty ? "Untitled" : post.title)
@@ -201,7 +198,7 @@ struct MonthCalendarView: View {
             }
             .padding()
         } else {
-            Text("Tap a day to see its posts. Long-press a post and drag it to move it.")
+            Text("Tap a day to see its posts. Long-press a post and drag it to another day to move it.")
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity).padding()
         }

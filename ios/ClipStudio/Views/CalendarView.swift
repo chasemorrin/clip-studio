@@ -167,6 +167,7 @@ struct PostEditSheet: View {
     @State private var title = ""
     @State private var caption = ""
     @State private var autoPost = false
+    @State private var pushBack = false
     @State private var saving = false
     @State private var error: String?
     @State private var previewFiles: [URL] = []
@@ -175,6 +176,12 @@ struct PostEditSheet: View {
 
     /// The latest copy from the server (it changes after re-editing the clip).
     private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
+
+    /// True when the date picker is on a different day than the post's saved day.
+    private var movedDay: Bool {
+        guard let at = current.publishAt else { return true }
+        return !Calendar.current.isDate(at, inSameDayAs: when)
+    }
 
     var body: some View {
         NavigationStack {
@@ -200,6 +207,9 @@ struct PostEditSheet: View {
                         .disabled(session.instagramUsername == nil)
                 } footer: {
                     if session.instagramUsername == nil { Text("Connect Instagram in Settings to post automatically.") }
+                }
+                if movedDay {
+                    PushBackSection(day: when, excluding: post.id, isOn: $pushBack)
                 }
                 Section("Caption") {
                     CaptionEditor(text: $caption, minHeight: 140)
@@ -255,7 +265,9 @@ struct PostEditSheet: View {
                             saving = true
                             defer { saving = false }
                             do {
+                                let push = pushBack && movedDay
                                 try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost)
+                                await posts.pushBackAfterScheduling(push, day: when, newID: post.id)
                                 dismiss()
                             } catch {
                                 self.error = error.localizedDescription
