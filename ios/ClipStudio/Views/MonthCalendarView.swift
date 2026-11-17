@@ -39,12 +39,16 @@ struct MonthCalendarView: View {
 
     private var header: some View {
         HStack {
-            Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left").padding(6) }
+            Button { shiftMonth(-1) } label: {
+                Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 40, height: 36)
+            }
             Spacer()
             Text(month.formatted(.dateTime.month(.wide).year()))
-                .font(.headline)
+                .font(.title3.weight(.semibold))
             Spacer()
-            Button { shiftMonth(1) } label: { Image(systemName: "chevron.right").padding(6) }
+            Button { shiftMonth(1) } label: {
+                Image(systemName: "chevron.right").font(.body.weight(.semibold)).frame(width: 40, height: 36)
+            }
         }
         .overlay(alignment: .trailing) {
             if !cal.isDate(month, equalTo: Date(), toGranularity: .month) || selectedDay == nil {
@@ -53,10 +57,12 @@ struct MonthCalendarView: View {
                     selectedDay = cal.startOfDay(for: Date())
                 }
                 .font(.subheadline)
-                .padding(.trailing, 44)
+                .padding(.trailing, 48)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
     }
 
     private var weekdayRow: some View {
