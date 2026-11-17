@@ -10,3 +10,5 @@ DerivedData/
 ios/ClipStudio.xcodeproj/
 ios/ClipStudio/Info.plist
 ios/ClipStudio/ClipStudio.entitlements
+ios/ClipStudioWidget/Info.plist
+ios/ClipStudioWidget/ClipStudioWidget.entitlements

@@ -31,14 +31,23 @@ struct RootView: View {
 }
 
 struct MainTabs: View {
+    @State private var tab = 0
+
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             HomeView()
                 .tabItem { Label("Clips", systemImage: "film.stack") }
+                .tag(0)
             CalendarView()
                 .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag(1)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(2)
+        }
+        // Tapping the home-screen widget opens the Calendar.
+        .onOpenURL { url in
+            if url.scheme == "clipstudio", url.host() == "calendar" { tab = 1 }
         }
     }
 }

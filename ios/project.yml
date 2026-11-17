@@ -23,6 +23,9 @@ targets:
         excludes:
           - "Info.plist"
           - "ClipStudio.entitlements"
+      - path: Shared
+    dependencies:
+      - target: ClipStudioWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chasemorrin.clipstudio
@@ -48,4 +51,28 @@ targets:
       properties:
         # Uncomment once you're in the Apple Developer Program (Sign in with Apple needs it):
         # com.apple.developer.applesignin: [Default]
-        {}
+        com.apple.security.application-groups: [group.com.chasemorrin.clipstudio]
+  ClipStudioWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ClipStudioWidget
+        excludes:
+          - "Info.plist"
+          - "ClipStudioWidget.entitlements"
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chasemorrin.clipstudio.widget
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: ClipStudioWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Clip Studio
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: ClipStudioWidget/ClipStudioWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.chasemorrin.clipstudio]

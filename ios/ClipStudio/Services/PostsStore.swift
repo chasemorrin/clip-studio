@@ -2,6 +2,7 @@ import AuthenticationServices
 import Foundation
 import SwiftUI
 import UIKit
+import WidgetKit
 
 struct MediaRef: Hashable {
     let key: String
@@ -129,8 +130,23 @@ final class PostsStore: ObservableObject {
             let r = try await APIClient.shared.request("GET", "v1/items")
             posts = (r["items"] as? [[String: Any]] ?? []).compactMap(Post.init)
             error = nil
+            updateWidget()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Hands the home-screen widget the next posts.
+    private func updateWidget() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let next = upcoming.filter { ($0.publishAt ?? .distantPast) >= today }.prefix(10).map { p in
+            UpcomingPost(id: p.id, title: p.title, date: p.publishAt ?? Date(), format: p.format,
+                         autoPost: p.state == .scheduled || p.state == .posting, failed: p.state == .failed)
+        }
+        let list = Array(next)
+        if list != UpcomingPosts.load() {
+            UpcomingPosts.save(list)
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
 
@@ -237,6 +253,7 @@ final class PostsStore: ObservableObject {
         do {
             try await APIClient.shared.request("DELETE", "v1/items/\(post.id)")
             posts.removeAll { $0.id == post.id }
+            updateWidget()
         } catch { self.error = error.localizedDescription }
     }
 }
