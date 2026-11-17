@@ -11,7 +11,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     # Your Apple Team ID (Xcode > Settings > Accounts, or developer.apple.com > Membership).
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: NG6KK63K26
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
@@ -49,8 +49,7 @@ targets:
     entitlements:
       path: ClipStudio/ClipStudio.entitlements
       properties:
-        # Uncomment once you're in the Apple Developer Program (Sign in with Apple needs it):
-        # com.apple.developer.applesignin: [Default]
+        com.apple.developer.applesignin: [Default]
         com.apple.security.application-groups: [group.com.chasemorrin.clipstudio]
   ClipStudioWidget:
     type: app-extension
