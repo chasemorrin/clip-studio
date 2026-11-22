@@ -458,8 +458,13 @@ final class InstagramConnector: NSObject, ASWebAuthenticationPresentationContext
                     }
                     return
                 }
-                let items = URLComponents(url: callback ?? url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                let value = { (name: String) in items.first { $0.name == name }?.value }
+                // The server form-encodes the answer (spaces as "+"), so decode it that way.
+                let items = URLComponents(url: callback ?? url, resolvingAgainstBaseURL: false)?.percentEncodedQueryItems ?? []
+                let value = { (name: String) in
+                    items.first { $0.name == name }?.value?
+                        .replacingOccurrences(of: "+", with: "%20")
+                        .removingPercentEncoding
+                }
                 switch value("status") {
                 case "connected": cont.resume(returning: value(valueKey) ?? "")
                 case "cancelled": cont.resume(throwing: APIError(code: "cancelled", message: "\(service) connection cancelled."))

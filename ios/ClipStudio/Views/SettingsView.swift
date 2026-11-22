@@ -73,7 +73,7 @@ struct SettingsView: View {
                         if let youtubeError {
                             Text(youtubeError).foregroundStyle(.red)
                         }
-                        if !session.youtubeAvailable && session.youtubeChannel == nil {
+                        if !session.youtubeAvailable && session.youtubeChannel == nil && youtubeError == nil {
                             Text("Add the Google client ID and secret to the server first (wrangler secret put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).")
                         }
                         Text("Vertical clips up to 3 minutes post as Shorts. Until Google approves Clip Studio, YouTube keeps uploads private: make each one public in the YouTube app.")
@@ -202,12 +202,15 @@ struct SettingsView: View {
         defer { youtubeConnecting = false }
         do {
             _ = try await connector.connectYouTube()
-            await session.refreshProfile()
         } catch let e as APIError where e.code == "cancelled" {
             // Closed the login sheet.
+        } catch let e as APIError where e.code == "not_configured" {
+            youtubeError = "YouTube isn't set up on the server yet. Add the Google client ID and secret (wrangler secret put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET), then try again."
         } catch {
             youtubeError = error.localizedDescription
         }
+        // Also picks up whether the server has the Google keys now.
+        await session.refreshProfile()
     }
 
     static func timeFromMinutes(_ m: Int) -> Date {
