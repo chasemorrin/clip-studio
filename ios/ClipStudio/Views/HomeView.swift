@@ -55,6 +55,9 @@ struct HomeView: View {
     @ObservedObject private var store = ProjectStore.shared
     @State private var openSaved: OpenSaved?
     @State private var confirmDelete: SavedProject?
+    @AppStorage("pickMode") private var modeRaw = PickMode.claude.rawValue
+    /// The video picked and shown in the preview, waiting for "Find clips" / "Edit this video".
+    @State private var selected: Footage?
     @State private var pick: PhotosPickerItem?
     @State private var manualPicks: [PhotosPickerItem] = []
     @State private var footage: Footage?
@@ -63,6 +66,9 @@ struct HomeView: View {
     @State private var mixed: ManualImport?
     @State private var loading = false
     @State private var error: String?
+
+    private var mode: PickMode { PickMode(rawValue: modeRaw) ?? .claude }
+    private var savedForSelected: SavedProject? { selected?.assetID.flatMap { store.project(forAsset: $0) } }
 
     var body: some View {
         NavigationStack {
@@ -79,20 +85,60 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
-                VStack(spacing: 10) {
-                    PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
-                        buttonLabel(loading ? "Opening video…" : "Choose footage", icon: "video.badge.plus")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pick clips with").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    Picker("Pick clips with", selection: $modeRaw) {
+                        ForEach(PickMode.allCases) { m in Text(m.label).tag(m.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(mode.explanation)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let selected {
+                    VStack(alignment: .leading, spacing: 10) {
+                        FootagePreview(url: selected.url)
+                        if let saved = savedForSelected {
+                            Button {
+                                openSaved = OpenSaved(project: saved, url: selected.url)
+                            } label: {
+                                Label("Already scanned: open its \(saved.clipCount) saved clip\(saved.clipCount == 1 ? "" : "s")",
+                                      systemImage: "film.stack")
+                                    .font(.subheadline)
+                            }
+                        }
+                        Button(role: .destructive) {
+                            self.selected = nil
+                        } label: {
+                            Label("Choose a different video", systemImage: "xmark.circle").font(.subheadline)
+                        }
+                    }
+                    Button {
+                        if mode == .manual {
+                            manualVideo = Footage(url: selected.url, useClaude: false, assetID: selected.assetID)
+                        } else {
+                            footage = Footage(url: selected.url, useClaude: mode == .claude, assetID: selected.assetID)
+                        }
+                    } label: {
+                        buttonLabel(mode == .manual ? "Edit this video" : "Find clips",
+                                    icon: mode == .manual ? "scissors" : mode == .claude ? "sparkles" : "waveform")
                     }
                     .buttonStyle(.borderedProminent)
-                    Text("You can watch it first, then choose Claude, on-device or manual.")
-                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
-                        buttonLabel("Post finished photos or videos", icon: "photo.on.rectangle.angled")
+                } else {
+                    Group {
+                        if mode == .manual {
+                            PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
+                                buttonLabel(loading ? "Opening…" : "Choose video or photos", icon: "photo.on.rectangle.angled")
+                            }
+                        } else {
+                            PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
+                                buttonLabel(loading ? "Opening video…" : "Choose footage", icon: "video.badge.plus")
+                            }
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .padding(.top, 6)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(loading)
                 }
-                .disabled(loading)
                 if loading { ProgressView() }
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
@@ -105,7 +151,7 @@ struct HomeView: View {
           }
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(item: $footage) { f in FootagePreviewView(url: f.url, assetID: f.assetID) }
+            .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
             .navigationDestination(item: $openSaved) { o in ProjectView(saved: o.project, url: o.url) }
             .confirmationDialog("Remove this video's clips?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                                 titleVisibility: .visible, presenting: confirmDelete) { p in
@@ -192,14 +238,14 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            // Watch it first; the preview screen offers its saved clips if it's been scanned before.
-            footage = Footage(url: movie.url, useClaude: false, assetID: item.itemIdentifier)
+            // Show it in the preview first; scanning starts when you tap Find clips.
+            selected = Footage(url: movie.url, useClaude: false, assetID: item.itemIdentifier)
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
         }
     }
 
-    /// Manual: one video opens the editor with the whole video; photos open the photo screen;
+    /// Manual: one video goes in the preview (then "Edit this video"); photos open the photo screen;
     /// a mix of several videos/photos is posted as is.
     private func loadManual(_ picks: [PhotosPickerItem]) async {
         loading = true
@@ -209,7 +255,7 @@ struct HomeView: View {
             let imported = try await ManualImport.load(picks)
             let videos = imported.items.filter(\.isVideo)
             if imported.items.count == 1, let v = videos.first, let url = v.videoURL {
-                manualVideo = Footage(url: url, useClaude: false, assetID: v.assetID)
+                selected = Footage(url: url, useClaude: false, assetID: v.assetID)
             } else if videos.isEmpty {
                 photos = PhotoImport(images: imported.items.compactMap(\.image))
             } else {
