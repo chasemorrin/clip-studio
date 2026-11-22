@@ -24,6 +24,37 @@ struct Post: Identifiable, Hashable {
     var permalink: URL?
     var media: [MediaRef] = []
     var plan: ClipPlan?
+    var youtube = YouTubeStatus()
+
+    /// YouTube Shorts posting, tracked separately from Instagram.
+    struct YouTubeStatus: Hashable {
+        enum State { case off, scheduled, uploading, posted, failed }
+        var state: State = .off
+        var title: String?
+        var privacy: String?
+        var error: String?
+        var url: URL?
+
+        init() {}
+        init(_ d: [String: Any]?) {
+            guard let d else { return }
+            switch d["state"] as? String {
+            case "queued": state = .scheduled
+            case "uploading": state = .uploading
+            case "posted": state = .posted
+            case "failed": state = .failed
+            default: state = .off
+            }
+            title = d["title"] as? String
+            privacy = d["privacy"] as? String
+            error = d["error"] as? String
+            url = (d["url"] as? String).flatMap(URL.init(string:))
+        }
+
+        var isOn: Bool { state != .off }
+        /// Still has work to do (or failed and could be retried).
+        var isPending: Bool { state == .scheduled || state == .uploading || state == .failed }
+    }
 
     init?(_ d: [String: Any]) {
         guard let id = d["id"] as? String else { return nil }
@@ -41,6 +72,7 @@ struct Post: Identifiable, Hashable {
             (m["key"] as? String).map { MediaRef(key: $0, type: m["type"] as? String ?? "video") }
         }
         plan = ClipPlan(json: d["plan"])
+        youtube = YouTubeStatus(d["youtube"] as? [String: Any])
     }
 
     enum State { case scheduled, posting, posted, failed, notAutoPosting }
@@ -55,7 +87,21 @@ struct Post: Identifiable, Hashable {
         }
     }
 
-    var isEditable: Bool { state != .posting && state != .posted }
+    /// Everything that was going to post has posted (Instagram and, if it's on, YouTube).
+    var isFullyPosted: Bool {
+        switch state {
+        case .posted: return !youtube.isPending
+        case .notAutoPosting: return youtube.state == .posted
+        default: return false
+        }
+    }
+
+    var isEditable: Bool { !isFullyPosted && state != .posting && youtube.state != .uploading }
+
+    var hasVideo: Bool { media.contains(where: \.isVideo) }
+
+    /// Something failed on either platform and can be retried.
+    var canRetry: Bool { state == .failed || youtube.state == .failed }
 }
 
 /// Your posting days and time, chosen in Settings.
@@ -111,16 +157,16 @@ final class PostsStore: ObservableObject {
     @Published var error: String?
 
     var upcoming: [Post] {
-        posts.filter { $0.publishAt != nil && $0.state != .posted }.sorted { ($0.publishAt ?? .distantFuture) < ($1.publishAt ?? .distantFuture) }
+        posts.filter { $0.publishAt != nil && !$0.isFullyPosted }.sorted { ($0.publishAt ?? .distantFuture) < ($1.publishAt ?? .distantFuture) }
     }
 
     var recentlyPosted: [Post] {
-        posts.filter { $0.state == .posted }.sorted { ($0.publishAt ?? .distantPast) > ($1.publishAt ?? .distantPast) }
+        posts.filter { $0.isFullyPosted }.sorted { ($0.publishAt ?? .distantPast) > ($1.publishAt ?? .distantPast) }
     }
 
     /// Days that already have something scheduled (so new clips go to open days).
     var takenDays: Set<String> {
-        Set(posts.filter { $0.state != .posted && $0.publishAt != nil }.compactMap { $0.publishAt.map(PostingSchedule.dayKey) })
+        Set(posts.filter { !$0.isFullyPosted && $0.publishAt != nil }.compactMap { $0.publishAt.map(PostingSchedule.dayKey) })
     }
 
     func refresh() async {
@@ -141,7 +187,8 @@ final class PostsStore: ObservableObject {
         let today = Calendar.current.startOfDay(for: Date())
         let next = upcoming.filter { ($0.publishAt ?? .distantPast) >= today }.prefix(10).map { p in
             UpcomingPost(id: p.id, title: p.title, date: p.publishAt ?? Date(), format: p.format,
-                         autoPost: p.state == .scheduled || p.state == .posting, failed: p.state == .failed)
+                         autoPost: p.state == .scheduled || p.state == .posting || p.youtube.state == .scheduled || p.youtube.state == .uploading,
+                         failed: p.state == .failed || p.youtube.state == .failed)
         }
         let list = Array(next)
         if list != UpcomingPosts.load() {
@@ -152,10 +199,11 @@ final class PostsStore: ObservableObject {
 
     /// Uploads a finished clip and puts it on the calendar. Returns the new post's id.
     @discardableResult
-    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool, sourceAssetID: String? = nil) async throws -> String {
+    func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool, youtube: Bool = false, youtubeTitle: String? = nil,
+                  sourceAssetID: String? = nil) async throws -> String {
         let media = try await APIClient.shared.upload(file: file)
         return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why, format: "reel",
-                                media: [media], at: date, autoPost: autoPost,
+                                media: [media], at: date, autoPost: autoPost, youtube: youtube, youtubeTitle: youtubeTitle,
                                 plan: sourceAssetID.flatMap { ClipPlan(clip: clip, assetId: $0).json })
     }
 
@@ -187,7 +235,8 @@ final class PostsStore: ObservableObject {
     /// Puts already-uploaded media on the calendar. Returns the new post's id.
     @discardableResult
     func create(title: String, caption: String, notes: String = "", format: String,
-                media: [(key: String, type: String)], at date: Date, autoPost: Bool, plan: [String: Any]? = nil) async throws -> String {
+                media: [(key: String, type: String)], at date: Date, autoPost: Bool, youtube: Bool = false, youtubeTitle: String? = nil,
+                plan: [String: Any]? = nil) async throws -> String {
         var body: [String: Any] = [
             "title": title,
             "pillar": "live",
@@ -200,6 +249,8 @@ final class PostsStore: ObservableObject {
             "media": media.map { ["key": $0.key, "type": $0.type] },
         ]
         if autoPost { body["autoPost"] = true }
+        if youtube { body["youtube"] = true }
+        if let youtubeTitle, !youtubeTitle.isEmpty { body["ytTitle"] = String(youtubeTitle.prefix(100)) }
         if let plan { body["plan"] = plan }
         let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
@@ -209,12 +260,19 @@ final class PostsStore: ObservableObject {
     /// True while something is posting or due within two minutes, so the Calendar should check often.
     var somethingIsHappening: Bool {
         let soon = Date().addingTimeInterval(120)
-        return posts.contains { $0.state == .posting || ($0.state == .scheduled && ($0.publishAt ?? .distantFuture) <= soon) }
+        return posts.contains {
+            $0.state == .posting || $0.youtube.state == .uploading
+                || (($0.state == .scheduled || $0.youtube.state == .scheduled) && ($0.publishAt ?? .distantFuture) <= soon)
+        }
     }
 
     /// Start publishing right away instead of waiting for the scheduled time.
-    func postNow(id: String) async throws {
-        try await APIClient.shared.request("POST", "v1/items/\(id)/publish-now")
+    /// Posts right away. By default: Instagram, plus YouTube when it's switched on for the post.
+    func postNow(id: String, instagram: Bool? = nil, youtube: Bool? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let instagram { body["instagram"] = instagram }
+        if let youtube { body["youtube"] = youtube }
+        try await APIClient.shared.request("POST", "v1/items/\(id)/publish-now", json: body)
         await refresh()
     }
 
@@ -222,7 +280,8 @@ final class PostsStore: ObservableObject {
         do { try await postNow(id: post.id) } catch { self.error = error.localizedDescription }
     }
 
-    func update(_ post: Post, title: String, publishAt: Date, caption: String, autoPost: Bool) async throws {
+    func update(_ post: Post, title: String, publishAt: Date, caption: String, autoPost: Bool,
+                youtube: Bool? = nil, youtubeTitle: String? = nil) async throws {
         var body: [String: Any] = [
             "title": title,
             "publishAt": Int(publishAt.timeIntervalSince1970),
@@ -230,7 +289,11 @@ final class PostsStore: ObservableObject {
             "caption": caption,
         ]
         let wasAuto = post.state == .scheduled || post.state == .failed
-        if autoPost != wasAuto || (autoPost && post.state == .failed) { body["autoPost"] = autoPost }
+        if post.state != .posted, autoPost != wasAuto || (autoPost && post.state == .failed) { body["autoPost"] = autoPost }
+        if let youtube, post.youtube.state != .posted, youtube != post.youtube.isOn || (youtube && post.youtube.state == .failed) {
+            body["youtube"] = youtube
+        }
+        if let youtubeTitle { body["ytTitle"] = String(youtubeTitle.prefix(100)) }
         try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
         await refresh()
     }
@@ -356,7 +419,7 @@ extension ClipSuggestion {
     }
 }
 
-/// Opens Instagram's login in a secure browser sheet and comes back to the app.
+/// Opens Instagram's (or Google's, for YouTube) login in a secure browser sheet and comes back to the app.
 @MainActor
 final class InstagramConnector: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
@@ -372,33 +435,42 @@ final class InstagramConnector: NSObject, ASWebAuthenticationPresentationContext
 
     /// Returns the connected Instagram username.
     func connect() async throws -> String {
-        let r = try await APIClient.shared.request("GET", "v1/instagram/connect")
+        try await connect(path: "v1/instagram/connect", service: "Instagram", valueKey: "username")
+    }
+
+    /// Returns the connected YouTube channel's name.
+    func connectYouTube() async throws -> String {
+        try await connect(path: "v1/youtube/connect", service: "YouTube", valueKey: "channel")
+    }
+
+    private func connect(path: String, service: String, valueKey: String) async throws -> String {
+        let r = try await APIClient.shared.request("GET", path)
         guard let s = r["url"] as? String, let url = URL(string: s) else {
-            throw APIError(code: "bad_response", message: "The server didn't return an Instagram login link.")
+            throw APIError(code: "bad_response", message: "The server didn't return a \(service) login link.")
         }
         return try await withCheckedThrowingContinuation { cont in
             let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: "clipstudio") { callback, error in
                 if let error {
                     if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin {
-                        cont.resume(throwing: APIError(code: "cancelled", message: "Instagram connection cancelled."))
+                        cont.resume(throwing: APIError(code: "cancelled", message: "\(service) connection cancelled."))
                     } else {
-                        cont.resume(throwing: APIError(code: "ig_failed", message: error.localizedDescription))
+                        cont.resume(throwing: APIError(code: "connect_failed", message: error.localizedDescription))
                     }
                     return
                 }
                 let items = URLComponents(url: callback ?? url, resolvingAgainstBaseURL: false)?.queryItems ?? []
                 let value = { (name: String) in items.first { $0.name == name }?.value }
                 switch value("status") {
-                case "connected": cont.resume(returning: value("username") ?? "")
-                case "cancelled": cont.resume(throwing: APIError(code: "cancelled", message: "Instagram connection cancelled."))
-                default: cont.resume(throwing: APIError(code: "ig_failed", message: value("message") ?? "Instagram connection failed. Try again."))
+                case "connected": cont.resume(returning: value(valueKey) ?? "")
+                case "cancelled": cont.resume(throwing: APIError(code: "cancelled", message: "\(service) connection cancelled."))
+                default: cont.resume(throwing: APIError(code: "connect_failed", message: value("message") ?? "\(service) connection failed. Try again."))
                 }
             }
             auth.presentationContextProvider = self
             auth.prefersEphemeralWebBrowserSession = false
             self.session = auth
             if !auth.start() {
-                cont.resume(throwing: APIError(code: "ig_failed", message: "Couldn't open the Instagram login. Try again."))
+                cont.resume(throwing: APIError(code: "connect_failed", message: "Couldn't open the \(service) login. Try again."))
             }
         }
     }

@@ -12,6 +12,10 @@ struct SettingsView: View {
     @State private var instagramError: String?
     @State private var showTokenSheet = false
     @State private var connector = InstagramConnector()
+    @State private var youtubeConnecting = false
+    @State private var youtubeError: String?
+    @State private var confirmYouTubeDisconnect = false
+    @AppStorage("youtubeByDefault") private var youtubeByDefault = true
 
     // Calendar weekday numbers in Monday-first order (1 = Sunday).
     private let weekdays = [2, 3, 4, 5, 6, 7, 1]
@@ -43,6 +47,36 @@ struct SettingsView: View {
                             Text(instagramError).foregroundStyle(.red)
                         }
                         Text("Needed for automatic posting. Your account must be a Creator or Business account.")
+                    }
+                }
+
+                Section {
+                    if let channel = session.youtubeChannel {
+                        LabeledContent("Connected", value: session.youtubeHandle ?? channel)
+                        Toggle("Post new clips to YouTube too", isOn: $youtubeByDefault)
+                        Button("Disconnect YouTube", role: .destructive) { confirmYouTubeDisconnect = true }
+                    } else {
+                        Button {
+                            Task { await connectYouTube() }
+                        } label: {
+                            HStack {
+                                Label("Connect YouTube", systemImage: "play.rectangle")
+                                if youtubeConnecting { Spacer(); ProgressView() }
+                            }
+                        }
+                        .disabled(youtubeConnecting)
+                    }
+                } header: {
+                    Text("YouTube Shorts")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let youtubeError {
+                            Text(youtubeError).foregroundStyle(.red)
+                        }
+                        if !session.youtubeAvailable && session.youtubeChannel == nil {
+                            Text("Add the Google client ID and secret to the server first (wrangler secret put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).")
+                        }
+                        Text("Vertical clips up to 3 minutes post as Shorts. Until Google approves Clip Studio, YouTube keeps uploads private: make each one public in the YouTube app.")
                     }
                 }
 
@@ -122,6 +156,18 @@ struct SettingsView: View {
             } message: {
                 Text("Scheduled posts stay on your calendar but won't post until you connect again.")
             }
+            .confirmationDialog("Disconnect YouTube?", isPresented: $confirmYouTubeDisconnect, titleVisibility: .visible) {
+                Button("Disconnect", role: .destructive) {
+                    Task {
+                        do {
+                            try await APIClient.shared.request("POST", "v1/youtube/disconnect")
+                            await session.refreshProfile()
+                        } catch { youtubeError = error.localizedDescription }
+                    }
+                }
+            } message: {
+                Text("Clip Studio's access to your channel is revoked with Google. Scheduled posts stay on your calendar but won't go to YouTube until you connect again.")
+            }
             .confirmationDialog("Delete your account?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete account and data", role: .destructive) {
                     Task {
@@ -129,7 +175,7 @@ struct SettingsView: View {
                     }
                 }
             } message: {
-                Text("This removes your calendar, scheduled posts, uploaded clips and Instagram connection from the server. Videos on your phone aren't touched.")
+                Text("This removes your calendar, scheduled posts, uploaded clips and Instagram and YouTube connections from the server. Videos on your phone aren't touched.")
             }
         }
     }
@@ -147,6 +193,20 @@ struct SettingsView: View {
             instagramError = "Instagram isn't set up on the server yet. Create the Meta app and add its ID and secret to the server (README: Connect Instagram), then try again."
         } catch {
             instagramError = error.localizedDescription
+        }
+    }
+
+    private func connectYouTube() async {
+        youtubeConnecting = true
+        youtubeError = nil
+        defer { youtubeConnecting = false }
+        do {
+            _ = try await connector.connectYouTube()
+            await session.refreshProfile()
+        } catch let e as APIError where e.code == "cancelled" {
+            // Closed the login sheet.
+        } catch {
+            youtubeError = error.localizedDescription
         }
     }
 

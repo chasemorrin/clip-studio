@@ -1,4 +1,4 @@
-// Fake Apple, Claude and Instagram servers for local testing.
+// Fake Apple, Claude, Instagram, Google and YouTube servers for local testing.
 import http from "node:http";
 import crypto from "node:crypto";
 
@@ -16,19 +16,62 @@ export function appleToken({ sub = "apple-user-1", aud = "com.chasemorrin.clipst
 
 let containerN = 0;
 const containers = new Map(); // id -> { checks, fail, fetched }
-export const state = { failNextContainer: false, claudeBodies: [] };
+export const state = { failNextContainer: false, claudeBodies: [], ytUploads: [], ytFailNext: 0, ytRevoked: [] };
+let ytSession = 0;
+const ytSessions = new Map();
 
 function send(res, code, obj) { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
 
 export function start(port) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    let body = "";
-    for await (const ch of req) body += ch;
+    const chunks = [];
+    for await (const ch of req) chunks.push(ch);
+    const raw = Buffer.concat(chunks);
+    const body = raw.toString();
     log.push(`${req.method} ${url.pathname}${url.search}`);
     const p = url.pathname;
 
     if (p === "/apple/keys") return send(res, 200, { keys: [jwk] });
+
+    // Google sign-in
+    if (p === "/token" && req.method === "POST") {
+      const f = new URLSearchParams(body);
+      if (f.get("client_id") !== "test-g-client" || f.get("client_secret") !== "test-g-secret") return send(res, 401, { error: "invalid_client" });
+      if (f.get("grant_type") === "authorization_code") {
+        if (f.get("code") !== "good-g-code") return send(res, 400, { error: "invalid_grant", error_description: "Bad code" });
+        const scope = f.get("code") === "good-g-code" ? "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly" : "";
+        return send(res, 200, { access_token: "ya29-1", expires_in: 3599, refresh_token: "1//refresh-1", scope, token_type: "Bearer" });
+      }
+      if (f.get("grant_type") === "refresh_token") {
+        if (f.get("refresh_token") !== "1//refresh-1") return send(res, 400, { error: "invalid_grant", error_description: "Token has been expired or revoked." });
+        return send(res, 200, { access_token: "ya29-2", expires_in: 3599, token_type: "Bearer" });
+      }
+    }
+    if (p === "/revoke") { state.ytRevoked.push(new URLSearchParams(body).get("token")); return send(res, 200, {}); }
+    const bearer = (req.headers.authorization || "").replace(/^Bearer /, "");
+    if (p === "/youtube/v3/channels") {
+      if (!bearer.startsWith("ya29-")) return send(res, 401, { error: { message: "Invalid Credentials" } });
+      return send(res, 200, { items: [{ id: "UC123", snippet: { title: "Chase Morrin", customUrl: "@chasemorrin" } }] });
+    }
+    if (p === "/upload/youtube/v3/videos" && req.method === "POST") {
+      if (!bearer.startsWith("ya29-")) return send(res, 401, { error: { message: "Invalid Credentials" } });
+      if (state.ytFailNext > 0) { state.ytFailNext--; return send(res, 503, { error: { message: "Backend Error", errors: [{ reason: "backendError" }] } }); }
+      if (url.searchParams.get("uploadType") !== "resumable") return send(res, 400, { error: { message: "expected resumable" } });
+      const id = ++ytSession;
+      ytSessions.set(id, { meta: JSON.parse(body), length: Number(req.headers["x-upload-content-length"]), type: req.headers["x-upload-content-type"], bearer });
+      res.writeHead(200, { location: `http://127.0.0.1:${port}/upload-session/${id}` });
+      return res.end();
+    }
+    if (p.startsWith("/upload-session/") && req.method === "PUT") {
+      const sess = ytSessions.get(Number(p.split("/").pop()));
+      if (!sess) return send(res, 404, { error: { message: "no session" } });
+      if (raw.length !== sess.length) return send(res, 400, { error: { message: `got ${raw.length} bytes, expected ${sess.length}` } });
+      const vid = `vid${state.ytUploads.length + 1}`;
+      state.ytUploads.push({ ...sess, bytes: raw.length, first: raw[1000], id: vid });
+      // Unaudited API projects: YouTube locks uploads to private.
+      return send(res, 200, { id: vid, status: { uploadStatus: "uploaded", privacyStatus: "private" } });
+    }
 
     if (p === "/v1/messages") {
       const b = JSON.parse(body);

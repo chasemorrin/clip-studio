@@ -81,6 +81,25 @@ Older apps with "API setup with Instagram login" also work: leave `IG_LOGIN_URL`
 
 For your own account no app review is needed. Other people's accounts need app review and business verification (App Store phase).
 
+## Connect YouTube (Shorts)
+
+1. In Google Cloud (project "Clip Studio"), enable **YouTube Data API v3**.
+2. Google Auth Platform: External audience, app name "Clip Studio", home/privacy/terms links to this server, scopes `youtube.upload` and `youtube.readonly`, then **Publish app** (In production) so logins don't expire after 7 days.
+3. Clients → Create client → Web application, redirect URI `https://<your server>/youtube/callback`.
+4. On your Mac:
+
+```bash
+cd server
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler d1 migrations apply clip-studio --remote
+npx wrangler deploy
+```
+
+5. In the app: Settings → YouTube Shorts → Connect YouTube.
+
+Until Google approves the app in its YouTube API audit, YouTube keeps every upload private; make each one public in the YouTube app. Set `CONTACT_EMAIL` in `wrangler.toml` so the homepage and privacy policy show a contact.
+
 ## Costs
 
 Cloudflare's free tier covers this at personal volume (100k requests a day, 10 GB clip storage, free downloads). Clips are deleted after they post. The Claude API is billed per use in the Anthropic Console; the server caps it at `CLAUDE_DAILY_LIMIT` requests per person per day.

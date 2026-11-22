@@ -1,4 +1,4 @@
-// End-to-end test: runs the real server locally against fake Apple/Claude/Instagram services.
+// End-to-end test: runs the real server locally against fake Apple/Claude/Instagram/Google/YouTube services.
 // Usage: node test/e2e.mjs
 import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
@@ -23,6 +23,11 @@ fs.writeFileSync(".dev.vars", [
   "IG_APP_ID=test-ig-app",
   "CLAUDE_DAILY_LIMIT=3",
   `FB_GRAPH_BASE=http://127.0.0.1:${MOCK}`,
+  "GOOGLE_CLIENT_ID=test-g-client",
+  "GOOGLE_CLIENT_SECRET=test-g-secret",
+  `GOOGLE_OAUTH_BASE=http://127.0.0.1:${MOCK}`,
+  `YT_API_BASE=http://127.0.0.1:${MOCK}`,
+  "CONTACT_EMAIL=test@example.com",
   // Always set explicitly, so the real value in wrangler.toml doesn't leak into tests.
   `IG_LOGIN_URL=${UNIFIED ? `https://www.facebook.com/v25.0/dialog/oauth?client_id=test-app&redirect_uri=${encodeURIComponent(BASE + "/instagram/callback")}&config_id=cfg123&response_type=code` : ""}`,
 ].join("\n"));
@@ -60,6 +65,15 @@ try {
   for (let i = 0; i < 60; i++) { try { await fetch(BASE + "/"); break; } catch { await sleep(500); } }
 
   await check("health", async () => assert.equal((await api("GET", "/")).json.ok, true));
+  await check("homepage, privacy policy and terms for browsers mention YouTube and link to its terms", async () => {
+    const home = await (await fetch(BASE + "/", { headers: { Accept: "text/html" } })).text();
+    assert.match(home, /href="\/privacy"/); assert.match(home, /YouTube/); assert.match(home, /test@example\.com/);
+    const priv = await (await fetch(BASE + "/privacy")).text();
+    for (const must of ["YouTube API Services", "youtube.com/t/terms", "policies.google.com/privacy", "security.google.com/settings/security/permissions"]) {
+      assert.ok(priv.includes(must), `privacy policy mentions ${must}`);
+    }
+    assert.match(await (await fetch(BASE + "/terms")).text(), /agree to be bound by the <a href="https:\/\/www\.youtube\.com\/t\/terms">YouTube Terms of Service/);
+  });
   await check("rejects requests without sign-in", async () => assert.equal((await api("GET", "/v1/me")).status, 401));
   await check("test sign-in with wrong key is refused", async () => assert.equal((await api("POST", "/v1/auth/dev", { key: "nope" })).status, 403));
   await check("Sign in with Apple: valid token", async () => {
@@ -212,6 +226,137 @@ try {
     assert.match(out, UNIFIED ? /suat-tok/ : /long-tok-refreshed/);
   });
 
+  // YouTube.
+  const itemById = async (id) => (await api("GET", "/v1/items")).json.items.find((x) => x.id === id);
+  const clipOf = async (n) => {
+    const bytes = new Uint8Array(n).map((_, i) => (i * 7) % 253);
+    return { bytes, key: (await api("PUT", "/v1/media", bytes, { "content-type": "video/mp4" })).json.key };
+  };
+  await check("profile shows YouTube is available but not connected", async () => {
+    const me = (await api("GET", "/v1/me")).json;
+    assert.equal(me.youtube, null); assert.equal(me.youtubeAvailable, true);
+  });
+  await check("scheduling to YouTube before connecting fails clearly", async () => {
+    const { key } = await clipOf(4000);
+    const r = await api("POST", "/v1/items", { title: "Early", format: "reel", media: [{ key, type: "video" }], publishAt: 1, youtube: true });
+    assert.equal(r.json.item.youtube.state, "queued");
+    await tick();
+    const it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "failed"); assert.match(it.youtube.error, /Connect YouTube/);
+    await api("DELETE", `/v1/items/${it.id}`);
+  });
+  await check("connect YouTube", async () => {
+    const r = await api("GET", "/v1/youtube/connect");
+    const u = new URL(r.json.url);
+    assert.equal(u.hostname, "accounts.google.com");
+    assert.match(u.searchParams.get("scope"), /youtube\.upload/); assert.equal(u.searchParams.get("access_type"), "offline");
+    assert.equal(u.searchParams.get("redirect_uri"), `${BASE}/youtube/callback`);
+    const st = u.searchParams.get("state"); assert.match(st, /^y_/);
+    const cb = await api("GET", `/youtube/callback?code=good-g-code&state=${st}`);
+    assert.equal(cb.status, 302); assert.match(cb.headers.get("location"), /^clipstudio:\/\/youtube\?status=connected&channel=Chase\+Morrin/);
+    const me = (await api("GET", "/v1/me")).json;
+    assert.equal(me.youtube.channelTitle, "Chase Morrin"); assert.equal(me.youtube.handle, "@chasemorrin");
+  });
+  await check("YouTube login can't be replayed or used at the Instagram callback", async () => {
+    const st = new URL((await api("GET", "/v1/youtube/connect")).json.url).searchParams.get("state");
+    assert.match((await api("GET", `/instagram/callback?code=good-code&state=${st}`)).headers.get("location"), /status=error/);
+    const r = await api("GET", "/v1/youtube/connect"); const st2 = new URL(r.json.url).searchParams.get("state");
+    await api("GET", `/youtube/callback?code=good-g-code&state=${st2}`);
+    assert.match((await api("GET", `/youtube/callback?code=good-g-code&state=${st2}`)).headers.get("location"), /status=error/);
+    assert.match((await api("GET", `/youtube/callback?error=access_denied&state=x`)).headers.get("location"), /status=cancelled/);
+  });
+  await check("YouTube is refused for photos", async () => {
+    const a = (await api("PUT", "/v1/media", new Uint8Array(3000), { "content-type": "image/jpeg" })).json;
+    const r = await api("POST", "/v1/items", { title: "Photo", format: "photo", media: [a], publishAt: 1, youtube: true });
+    assert.equal(r.status, 400); assert.match(r.json.error.message, /needs a video/);
+  });
+  await check("a clip posts to Instagram and YouTube; the file is kept until both are done", async () => {
+    const { bytes, key } = await clipOf(1_500_000);
+    const r = await api("POST", "/v1/items", { title: "Solo, live", ytTitle: "Body and Soul solo <live> #Shorts", caption: "Live at the club", format: "reel",
+      media: [{ key, type: "video" }], publishAt: Math.floor(Date.now() / 1000) - 30, autoPost: true, youtube: true });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const id = r.json.item.id;
+    state.ytFailNext = 3; // YouTube is down for a bit: Instagram finishes first
+    await tick(); // IG -> publishing; YT fails (retry 1)
+    let it = await itemById(id);
+    assert.equal(it.youtube.state, "queued"); assert.match(it.youtube.error, /^Retrying/);
+    await tick(); await tick(); // IG posted; YT retries 2 and 3
+    it = await itemById(id);
+    assert.equal(it.postState, "posted", JSON.stringify(it));
+    assert.equal(it.media.length, 1, "file kept for YouTube");
+    assert.equal((await api("GET", `/v1/media-url/${key}`)).status, 200);
+    await tick(); // YT uploads
+    it = await itemById(id);
+    assert.equal(it.youtube.state, "posted", JSON.stringify(it)); assert.equal(it.youtube.error, null);
+    assert.equal(it.youtube.privacy, "private"); assert.match(it.youtube.url, /youtube\.com\/shorts\/vid/);
+    const up = state.ytUploads.at(-1);
+    assert.equal(up.bytes, bytes.length, "the whole file streamed to YouTube"); assert.equal(up.first, bytes[1000]);
+    assert.equal(up.meta.snippet.title, "Body and Soul solo live #Shorts"); assert.equal(up.meta.snippet.description, "Live at the club");
+    assert.equal(up.meta.snippet.categoryId, "10"); assert.equal(up.meta.status.privacyStatus, "public");
+    assert.equal(up.meta.status.selfDeclaredMadeForKids, false); assert.equal(up.type, "video/mp4");
+    assert.equal(it.media.length, 0, "file deleted once both are done");
+    assert.equal((await api("GET", `/v1/media-url/${key}`)).status, 404);
+  });
+  await check("YouTube-only post refreshes the expired access token and keeps the file", async () => {
+    sql("UPDATE yt_accounts SET access_expires_at = 0");
+    const { key } = await clipOf(6000);
+    const r = await api("POST", "/v1/items", { title: "YT only", format: "reel", media: [{ key, type: "video" }], publishAt: 1, youtube: true });
+    await tick();
+    const it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "posted", JSON.stringify(it)); assert.equal(it.postState, null);
+    assert.equal(state.ytUploads.at(-1).bearer, "ya29-2"); assert.match(sql("SELECT access_token FROM yt_accounts"), /ya29-2/);
+    assert.equal(it.media.length, 1, "Instagram might still be switched on later");
+    const again = await api("PATCH", `/v1/items/${it.id}`, { youtube: false });
+    assert.equal(again.json.item.youtube.state, "posted", "can't un-post");
+  });
+  await check("future YouTube posts wait; switching YouTube off cancels", async () => {
+    const { key } = await clipOf(5000);
+    const r = await api("POST", "/v1/items", { title: "Later", format: "reel", media: [{ key, type: "video" }], publishAt: Math.floor(Date.now() / 1000) + 3600, youtube: true });
+    const n = state.ytUploads.length;
+    await tick();
+    assert.equal((await itemById(r.json.item.id)).youtube.state, "queued"); assert.equal(state.ytUploads.length, n);
+    const off = await api("PATCH", `/v1/items/${r.json.item.id}`, { youtube: false });
+    assert.equal(off.json.item.youtube.state, null);
+  });
+  await check("post now sends to YouTube only when asked", async () => {
+    const { key } = await clipOf(5000);
+    const r = await api("POST", "/v1/items", { title: "Now YT", format: "reel", media: [{ key, type: "video" }], publishAt: Math.floor(Date.now() / 1000) + 86400 });
+    const pn = await api("POST", `/v1/items/${r.json.item.id}/publish-now`, { instagram: false, youtube: true });
+    assert.equal(pn.status, 200, JSON.stringify(pn.json)); assert.equal(pn.json.item.postState, null);
+    await sleep(1500); await tick();
+    const it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "posted", JSON.stringify(it)); assert.equal(it.postState, null);
+  });
+  await check("a revoked Google login fails with a reconnect message and can be retried", async () => {
+    sql("UPDATE yt_accounts SET access_expires_at = 0, refresh_token = 'revoked'");
+    const { key } = await clipOf(5000);
+    const r = await api("POST", "/v1/items", { title: "Revoked", format: "reel", media: [{ key, type: "video" }], publishAt: 1, youtube: true });
+    await tick();
+    let it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "failed"); assert.match(it.youtube.error, /Reconnect YouTube/);
+    sql("UPDATE yt_accounts SET refresh_token = '1//refresh-1'");
+    const rr = await api("POST", `/v1/items/${it.id}/retry`); assert.equal(rr.json.item.youtube.state, "queued");
+    await tick();
+    assert.equal((await itemById(it.id)).youtube.state, "posted");
+  });
+  await check("an interrupted upload is marked failed, not uploaded twice", async () => {
+    const { key } = await clipOf(5000);
+    const r = await api("POST", "/v1/items", { title: "Stuck", format: "reel", media: [{ key, type: "video" }], publishAt: 1 });
+    sql(`UPDATE items SET yt_state='uploading', yt_started_at=${Math.floor(Date.now() / 1000) - 3600} WHERE id='${r.json.item.id}'`);
+    assert.equal((await api("DELETE", `/v1/items/${r.json.item.id}`)).status, 409);
+    await tick();
+    const it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "failed"); assert.match(it.youtube.error, /interrupted/);
+  });
+  await check("disconnect YouTube revokes access with Google", async () => {
+    assert.equal((await api("POST", "/v1/youtube/disconnect")).json.disconnected, true);
+    assert.equal((await api("GET", "/v1/me")).json.youtube, null);
+    assert.equal(state.ytRevoked.at(-1), "1//refresh-1");
+    // Connect again so account deletion is tested with a channel connected.
+    const st = new URL((await api("GET", "/v1/youtube/connect")).json.url).searchParams.get("state");
+    await api("GET", `/youtube/callback?code=good-g-code&state=${st}`);
+  });
+
   // Claude.
   await check("Claude passthrough uses the server's model and caps tokens", async () => {
     const r = await api("POST", "/v1/claude", { system: "be brief", messages: [{ role: "user", content: "hello" }], maxTokens: 99999 });
@@ -241,6 +386,8 @@ try {
     assert.equal((await api("DELETE", "/v1/me")).json.deleted, true);
     assert.match(sql("SELECT COUNT(*) AS n FROM items"), /"n": 0/);
     assert.match(sql("SELECT COUNT(*) AS n FROM media"), /"n": 0/);
+    assert.match(sql("SELECT COUNT(*) AS n FROM yt_accounts"), /"n": 0/);
+    assert.equal(state.ytRevoked.length, 2, "YouTube access revoked on account deletion");
   });
 } finally {
   console.log(results.join("\n"));

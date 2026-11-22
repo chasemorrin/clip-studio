@@ -2,7 +2,7 @@ name = "clip-studio"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
-# Runs the Instagram publisher every 5 minutes.
+# Runs the Instagram and YouTube publisher every 5 minutes.
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -34,9 +34,13 @@ IG_API_VERSION = "v25.0"
 CLAUDE_MODEL = "claude-sonnet-5-5"
 CLAUDE_MAX_TOKENS = "4000"
 CLAUDE_DAILY_LIMIT = "150"
+# Shown on the homepage, privacy policy and terms (Google's YouTube audit wants a contact).
+CONTACT_EMAIL = ""
 
 # Secrets (set with `npx wrangler secret put NAME`, never in this file):
 #   SESSION_SECRET     long random string used to sign logins and media links
 #   ANTHROPIC_API_KEY  Claude API key from console.anthropic.com
 #   IG_APP_SECRET      Instagram app secret from the Meta developer dashboard
 #   DEV_LOGIN_KEY      optional; lets you sign in without Apple while testing
+#   GOOGLE_CLIENT_ID     Google Cloud OAuth client ID (Web application) for YouTube uploads
+#   GOOGLE_CLIENT_SECRET Google Cloud OAuth client secret

@@ -17,6 +17,14 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   IG_APP_SECRET: string;
   DEV_LOGIN_KEY?: string;
+  /** Shown on the homepage, privacy policy and terms. */
+  CONTACT_EMAIL?: string;
+  /** Google Cloud OAuth client (Web application) for YouTube uploads. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_AUTH_URL?: string;
+  GOOGLE_OAUTH_BASE?: string;
+  YT_API_BASE?: string;
   // Test-only overrides so local tests can point at fake services.
   ANTHROPIC_BASE?: string;
   IG_GRAPH_BASE?: string;
@@ -71,6 +79,21 @@ export async function signedMediaUrl(env: Env, key: string, ttlSec = 6 * 3600): 
   const exp = nowSec() + ttlSec;
   const sig = await hmac(env.SESSION_SECRET, `media:${key}:${exp}`);
   return `${env.PUBLIC_URL}/m/${encodeURIComponent(key)}?exp=${exp}&sig=${sig}`;
+}
+
+/** Deletes a post's files once every platform that needs them is done: Instagram has posted, and
+ *  YouTube is either off or has posted too. Posts that aren't auto-posting keep their files. */
+export async function cleanupIfDone(env: Env, itemId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT media, post_state, yt_state FROM items WHERE id = ?").bind(itemId)
+    .first<{ media: string; post_state: string | null; yt_state: string | null }>();
+  if (!row || row.post_state !== "posted" || (row.yt_state != null && row.yt_state !== "posted")) return false;
+  const media: { key: string }[] = JSON.parse(row.media || "[]");
+  for (const m of media) {
+    await env.MEDIA.delete(m.key);
+    await env.DB.prepare("DELETE FROM media WHERE key = ?").bind(m.key).run();
+  }
+  await env.DB.prepare("UPDATE items SET media = '[]', updated_at = ? WHERE id = ?").bind(nowSec(), itemId).run();
+  return true;
 }
 
 export class HttpError extends Error {

@@ -52,6 +52,8 @@ struct ManualPostView: View {
     @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var autoPost = true
+    @State private var youtube = false
+    @State private var youtubeTitle = ""
     @State private var pushBack = false
     @State private var working: String?
     @State private var progress: Double?
@@ -59,6 +61,8 @@ struct ManualPostView: View {
     @State private var finished: String?
 
     private var instagramConnected: Bool { session.instagramUsername != nil }
+    /// YouTube takes a single video (a Short), not photos or carousels.
+    private var toYouTube: Bool { youtube && format == "reel" && session.youtubeChannel != nil }
 
     private var format: String {
         items.count > 1 ? "carousel" : (items.first?.isVideo == true ? "reel" : "photo")
@@ -135,6 +139,9 @@ struct ManualPostView: View {
                 } footer: {
                     if !instagramConnected { Text("Connect Instagram in Settings to post automatically.") }
                 }
+                if format == "reel" {
+                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle)
+                }
                 PushBackSection(day: when, isOn: $pushBack)
                 Section {
                     Button {
@@ -142,11 +149,13 @@ struct ManualPostView: View {
                     } label: {
                         Label("Schedule", systemImage: "calendar.badge.plus")
                     }
-                    if instagramConnected {
+                    if instagramConnected || toYouTube {
                         Button {
                             Task { await run(postNow: true) }
                         } label: {
-                            Label("Post to Instagram now", systemImage: "paperplane.fill")
+                            Label(instagramConnected && toYouTube ? "Post to Instagram and YouTube now"
+                                  : toYouTube ? "Post to YouTube now" : "Post to Instagram now",
+                                  systemImage: "paperplane.fill")
                         }
                     }
                 }
@@ -171,6 +180,7 @@ struct ManualPostView: View {
             await posts.refresh()
             if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
             autoPost = instagramConnected
+            youtube = session.youtubeByDefault
         }
     }
 
@@ -202,9 +212,11 @@ struct ManualPostView: View {
             }
             working = postNow ? "Sending to Instagram…" : "Scheduling…"
             let at = postNow ? Date() : when
-            let id = try await posts.create(title: title.isEmpty ? "Untitled post" : title, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
-                                            media: media, at: at, autoPost: postNow || (autoPost && instagramConnected))
-            if postNow { try await posts.postNow(id: id) } else { await posts.pushBackAfterScheduling(pushBack, day: at, newID: id) }
+            let name = title.isEmpty ? "Untitled post" : title
+            let id = try await posts.create(title: name, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
+                                            media: media, at: at, autoPost: instagramConnected && (postNow || autoPost),
+                                            youtube: toYouTube, youtubeTitle: youtubeTitle.isEmpty ? name : youtubeTitle)
+            if postNow { try await posts.postNow(id: id, instagram: instagramConnected, youtube: toYouTube) } else { await posts.pushBackAfterScheduling(pushBack, day: at, newID: id) }
             finished = postNow ? "Posting to Instagram now" : "Scheduled for \(at.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
         } catch {
             self.error = error.localizedDescription

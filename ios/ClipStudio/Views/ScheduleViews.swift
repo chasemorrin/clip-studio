@@ -13,12 +13,15 @@ struct ScheduleSheet: View {
     @State private var when = Date().addingTimeInterval(3600)
     @State private var nextSlot: Date?
     @State private var autoPost = true
+    @State private var youtube = false
+    @State private var youtubeTitle = ""
     @State private var pushBack = false
     @State private var working: String?
     @State private var progress: Double?
     @State private var error: String?
 
     private var instagramConnected: Bool { session.instagramUsername != nil }
+    private var toYouTube: Bool { youtube && session.youtubeChannel != nil }
 
     var body: some View {
         NavigationStack {
@@ -45,16 +48,17 @@ struct ScheduleSheet: View {
                          ? "It posts within 5 minutes of the time you pick. You can change or cancel it in Calendar."
                          : "Connect Instagram in Settings to post automatically. Until then it goes on your calendar as a reminder.")
                 }
-                if instagramConnected {
+                YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle)
+                if instagramConnected || toYouTube {
                     Section {
                         Button {
                             Task { await schedule(postNow: true) }
                         } label: {
-                            Label("Post to Instagram now", systemImage: "paperplane.fill")
+                            Label(postNowLabel, systemImage: "paperplane.fill")
                         }
                         .disabled(working != nil)
                     } footer: {
-                        Text("Skips the calendar time. Usually live on Instagram within 1–3 minutes.")
+                        Text("Skips the calendar time. Usually live within 1–3 minutes.")
                     }
                 }
                 Section("Caption") {
@@ -89,7 +93,17 @@ struct ScheduleSheet: View {
                 nextSlot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first
                 if let nextSlot { when = nextSlot }
                 autoPost = instagramConnected
+                youtube = session.youtubeByDefault
+                if youtubeTitle.isEmpty { youtubeTitle = clip.title }
             }
+        }
+    }
+
+    private var postNowLabel: String {
+        switch (instagramConnected, toYouTube) {
+        case (true, true): return "Post to Instagram and YouTube now"
+        case (false, true): return "Post to YouTube now"
+        default: return "Post to Instagram now"
         }
     }
 
@@ -110,11 +124,11 @@ struct ScheduleSheet: View {
             working = "Uploading…"
             progress = nil
             let at = postNow ? Date() : when
-            let id = try await posts.schedule(file: file, clip: clip, at: at, autoPost: postNow || (autoPost && instagramConnected),
-                                              sourceAssetID: analysis.sourceAssetID)
+            let id = try await posts.schedule(file: file, clip: clip, at: at, autoPost: instagramConnected && (postNow || autoPost),
+                                              youtube: toYouTube, youtubeTitle: youtubeTitle, sourceAssetID: analysis.sourceAssetID)
             if postNow {
-                working = "Sending to Instagram…"
-                try await posts.postNow(id: id)
+                working = toYouTube ? "Sending…" : "Sending to Instagram…"
+                try await posts.postNow(id: id, instagram: instagramConnected, youtube: toYouTube)
             } else if pushBack {
                 working = "Moving the other posts back…"
                 await posts.pushBackAfterScheduling(true, day: at, newID: id)
@@ -126,6 +140,92 @@ struct ScheduleSheet: View {
             self.error = error.localizedDescription
             working = nil
         }
+    }
+}
+
+/// The "also post to YouTube" switch and the Short's title.
+struct YouTubeOptionsSection: View {
+    @Binding var isOn: Bool
+    @Binding var title: String
+    /// Shown under the switch, e.g. the post's YouTube status in the Calendar.
+    var status: Post.YouTubeStatus? = nil
+    var locked = false
+    @EnvironmentObject var session: SessionStore
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $isOn) {
+                Label("Post to YouTube Shorts", systemImage: "play.rectangle")
+            }
+            .disabled(session.youtubeChannel == nil || locked)
+            if isOn {
+                TextField("YouTube title", text: $title, axis: .vertical)
+                    .lineLimit(1...3)
+                    .disabled(locked)
+                    .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
+            }
+            if let status, status.isOn {
+                YouTubeStatusView(status: status)
+            }
+        } header: {
+            Text("YouTube")
+        } footer: {
+            if session.youtubeChannel == nil {
+                Text("Connect YouTube in Settings to post Shorts too.")
+            } else if isOn {
+                Text("Same time and caption as Instagram. Titles can be up to 100 characters (\(title.count) now).")
+            }
+        }
+    }
+}
+
+/// A post's YouTube status: where it is, any error, and a link once it's up.
+struct YouTubeStatusView: View {
+    let status: Post.YouTubeStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Status").foregroundStyle(.secondary)
+                Spacer()
+                YouTubePill(status: status)
+            }
+            if let e = status.error {
+                Text(e).font(.footnote).foregroundStyle(status.state == .failed ? Color.red : Color.orange)
+            }
+            if status.state == .posted, status.privacy == "private" {
+                Text("YouTube kept it private (Clip Studio isn't approved by Google yet). Make it public in the YouTube app.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let url = status.url {
+                Link("Open on YouTube", destination: url).font(.footnote)
+            }
+        }
+    }
+}
+
+struct YouTubePill: View {
+    let status: Post.YouTubeStatus
+
+    var body: some View {
+        let (text, color): (String, Color) = {
+            switch status.state {
+            case .off: return ("Off", .gray)
+            case .scheduled: return ("Scheduled", .red)
+            case .uploading: return ("Uploading…", .blue)
+            case .posted: return status.privacy == "private" ? ("Private", Color.orange) : ("Posted", Color.green)
+            case .failed: return ("Failed", .red)
+            }
+        }()
+        HStack(spacing: 3) {
+            Image(systemName: "play.rectangle.fill").font(.caption2)
+            Text(text)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .foregroundStyle(color)
+        .background(color.opacity(0.14), in: Capsule())
     }
 }
 
@@ -203,6 +303,7 @@ struct BatchScheduleSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var times: [UUID: Date] = [:]
     @State private var autoPost = true
+    @State private var youtube = false
     @State private var working: String?
     @State private var progress: Double?
     @State private var error: String?
@@ -242,8 +343,11 @@ struct BatchScheduleSheet: View {
                     }
                     Section {
                         Toggle("Post to Instagram automatically", isOn: $autoPost).disabled(!instagramConnected)
+                        Toggle("Post to YouTube Shorts too", isOn: $youtube).disabled(session.youtubeChannel == nil)
                     } footer: {
                         if !instagramConnected { Text("Connect Instagram in Settings to post automatically.") }
+                        else if session.youtubeChannel == nil { Text("Connect YouTube in Settings to post Shorts too.") }
+                        else if youtube { Text("Each Short uses the clip's title. You can change it per post in Calendar.") }
                     }
                 }
                 if let working {
@@ -271,6 +375,7 @@ struct BatchScheduleSheet: View {
                 let slots = PostingSchedule.nextSlots(pending.count, taken: posts.takenDays)
                 for (c, slot) in zip(pending, slots) { times[c.id] = slot }
                 autoPost = instagramConnected
+                youtube = session.youtubeByDefault
             }
         }
     }
@@ -299,7 +404,7 @@ struct BatchScheduleSheet: View {
                 progress = nil
                 let when = times[c.id] ?? Date().addingTimeInterval(3600)
                 try await posts.schedule(file: file!, clip: model.clips[i], at: when, autoPost: autoPost && instagramConnected,
-                                         sourceAssetID: analysis.sourceAssetID)
+                                         youtube: youtube && session.youtubeChannel != nil, sourceAssetID: analysis.sourceAssetID)
                 model.clips[i].scheduledFor = when
                 done += 1
             } catch {

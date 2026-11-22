@@ -165,8 +165,8 @@ struct MonthCalendarView: View {
             .padding(.horizontal, 3)
             .padding(.vertical, 1)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(post.state.color)
-            .background(post.state.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+            .foregroundStyle(post.displayColor)
+            .background(post.displayColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
             .contentShape(Rectangle())
         if post.isEditable {
             base.draggable(post.id) {
@@ -175,7 +175,7 @@ struct MonthCalendarView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .foregroundStyle(.white)
-                    .background(post.state.color, in: Capsule())
+                    .background(post.displayColor, in: Capsule())
             }
         } else {
             base.opacity(0.7)
@@ -262,6 +262,19 @@ struct MonthCalendarView: View {
             do { try await posts.move(post, toDay: day) } catch { moveError = error.localizedDescription }
         }
         return true
+    }
+}
+
+extension Post {
+    /// The Instagram status color, or YouTube's for a YouTube-only post.
+    var displayColor: Color {
+        guard state == .notAutoPosting, youtube.isOn else { return state.color }
+        switch youtube.state {
+        case .failed: return .red
+        case .uploading: return .blue
+        case .posted: return .green
+        default: return Theme.accent
+        }
     }
 }
 

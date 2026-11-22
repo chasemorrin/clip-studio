@@ -73,20 +73,20 @@ struct CalendarView: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { if post.isEditable { editing = post } }
                                 .swipeActions(edge: .leading) {
-                                    if post.state != .posting {
+                                    if post.isEditable {
                                         Button { Task { await posts.postNow(post) } } label: { Label("Post now", systemImage: "paperplane.fill") }
                                             .tint(Theme.accent)
                                     }
                                 }
                                 .swipeActions(edge: .trailing) {
-                                    if post.state != .posting {
+                                    if post.state != .posting && post.youtube.state != .uploading {
                                         Button(role: .destructive) { Task { await posts.delete(post) } } label: { Label("Delete", systemImage: "trash") }
                                     }
                                     if post.state == .scheduled {
                                         Button { Task { await posts.setAutoPost(post, false) } } label: { Label("Don't post", systemImage: "pause") }
                                             .tint(.gray)
                                     }
-                                    if post.state == .failed {
+                                    if post.canRetry {
                                         Button { Task { await posts.retry(post) } } label: { Label("Retry", systemImage: "arrow.clockwise") }
                                             .tint(.blue)
                                     }
@@ -112,7 +112,11 @@ struct PostRow: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(post.title.isEmpty ? "Untitled" : post.title).font(.headline).lineLimit(2)
                 Spacer()
-                StatusPill(state: post.state)
+                VStack(alignment: .trailing, spacing: 3) {
+                    // A YouTube-only post isn't a reminder: don't show "Reminder only" for its Instagram side.
+                    if !(post.youtube.isOn && post.state == .notAutoPosting) { StatusPill(state: post.state) }
+                    if post.youtube.isOn { YouTubePill(status: post.youtube) }
+                }
             }
             if let at = post.publishAt {
                 Text(at.formatted(.dateTime.hour().minute()))
@@ -127,8 +131,15 @@ struct PostRow: View {
             } else if let e = post.postError, post.state == .scheduled || post.state == .posting {
                 Text(e).font(.footnote).foregroundStyle(.orange)
             }
-            if let link = post.permalink {
-                Link("Open on Instagram", destination: link).font(.footnote)
+            if let e = post.youtube.error {
+                Text("YouTube: \(e)").font(.footnote).foregroundStyle(post.youtube.state == .failed ? Color.red : Color.orange)
+            }
+            if post.permalink != nil || post.youtube.url != nil {
+                HStack(spacing: 14) {
+                    if let link = post.permalink { Link("Open on Instagram", destination: link) }
+                    if let link = post.youtube.url { Link("Open on YouTube", destination: link) }
+                }
+                .font(.footnote)
             }
         }
         .padding(.vertical, 3)
@@ -167,6 +178,8 @@ struct PostEditSheet: View {
     @State private var title = ""
     @State private var caption = ""
     @State private var autoPost = false
+    @State private var youtube = false
+    @State private var youtubeTitle = ""
     @State private var pushBack = false
     @State private var saving = false
     @State private var error: String?
@@ -176,6 +189,11 @@ struct PostEditSheet: View {
 
     /// The latest copy from the server (it changes after re-editing the clip).
     private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
+
+    /// Post now goes to Instagram unless it's already there, and to YouTube when it's switched on and not up yet.
+    private var igNow: Bool { session.instagramUsername != nil && current.state != .posted }
+    private var ytNow: Bool { youtube && session.youtubeChannel != nil && current.youtube.state != .posted && current.hasVideo }
+    private var canPostNow: Bool { igNow || ytNow }
 
     /// True when the date picker is on a different day than the post's saved day.
     private var movedDay: Bool {
@@ -204,9 +222,14 @@ struct PostEditSheet: View {
                 Section {
                     DatePicker("Post on", selection: $when, in: earliest..., displayedComponents: [.date, .hourAndMinute])
                     Toggle("Post to Instagram automatically", isOn: $autoPost)
-                        .disabled(session.instagramUsername == nil)
+                        .disabled(session.instagramUsername == nil || current.state == .posted)
                 } footer: {
-                    if session.instagramUsername == nil { Text("Connect Instagram in Settings to post automatically.") }
+                    if current.state == .posted { Text("Already on Instagram.") }
+                    else if session.instagramUsername == nil { Text("Connect Instagram in Settings to post automatically.") }
+                }
+                if current.hasVideo || current.youtube.isOn {
+                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube,
+                                          locked: current.youtube.state == .posted)
                 }
                 if movedDay {
                     PushBackSection(day: when, excluding: post.id, isOn: $pushBack)
@@ -217,22 +240,25 @@ struct PostEditSheet: View {
                         Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
                     }
                 }
-                if session.instagramUsername != nil {
+                if canPostNow {
                     Section {
                         Button {
                             Task {
                                 saving = true
                                 defer { saving = false }
                                 do {
-                                    try await posts.update(current, title: title, publishAt: Date().addingTimeInterval(60), caption: caption, autoPost: true)
-                                    try await posts.postNow(id: post.id)
+                                    try await posts.update(current, title: title, publishAt: Date().addingTimeInterval(60), caption: caption,
+                                                           autoPost: igNow, youtube: ytNow, youtubeTitle: youtubeTitle)
+                                    let latest = posts.posts.first { $0.id == post.id } ?? current
+                                    try await posts.postNow(id: post.id, instagram: igNow && latest.state != .posted, youtube: ytNow)
                                     dismiss()
                                 } catch {
                                     self.error = error.localizedDescription
                                 }
                             }
                         } label: {
-                            Label("Post to Instagram now", systemImage: "paperplane.fill")
+                            Label(igNow && ytNow ? "Post to Instagram and YouTube now" : ytNow ? "Post to YouTube now" : "Post to Instagram now",
+                                  systemImage: "paperplane.fill")
                         }
                         .disabled(saving)
                     } footer: {
@@ -266,7 +292,9 @@ struct PostEditSheet: View {
                             defer { saving = false }
                             do {
                                 let push = pushBack && movedDay
-                                try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost)
+                                try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
+                                                       youtube: session.youtubeChannel != nil ? youtube : nil,
+                                                       youtubeTitle: youtube ? youtubeTitle : nil)
                                 await posts.pushBackAfterScheduling(push, day: when, newID: post.id)
                                 dismiss()
                             } catch {
@@ -282,6 +310,8 @@ struct PostEditSheet: View {
                 caption = post.caption
                 title = post.title
                 autoPost = post.state == .scheduled || post.state == .failed
+                youtube = post.youtube.isOn
+                youtubeTitle = post.youtube.title ?? post.title
             }
             .onChange(of: current.media.map(\.key)) { _, _ in savedToPhotos = false }
             // After re-editing the clip, pick up its new title and caption.

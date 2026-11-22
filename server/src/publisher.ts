@@ -1,4 +1,5 @@
-import { Env, nowSec, signedMediaUrl } from "./util";
+import { Env, cleanupIfDone, nowSec, signedMediaUrl } from "./util";
+import { runYouTube } from "./youtube";
 import { IgAccount, IgError, containerStatus, createContainer, publishContainer, refreshTokens } from "./instagram";
 
 interface MediaRef { key: string; type: "video" | "image"; }
@@ -76,16 +77,13 @@ async function step(env: Env, row: Row): Promise<void> {
       return update(env, row.id, { post_attempts: row.post_attempts + 1 });
     }
     const p = await publishContainer(env, acct, row.ig_container_id);
-    await update(env, row.id, { post_state: "posted", status: "posted", ig_media_id: p.id, ig_permalink: p.permalink || null, post_error: null, media: "[]" });
-    // The file has done its job; free the storage.
-    for (const m of media) {
-      await env.MEDIA.delete(m.key);
-      await env.DB.prepare("DELETE FROM media WHERE key = ?").bind(m.key).run();
-    }
+    await update(env, row.id, { post_state: "posted", status: "posted", ig_media_id: p.id, ig_permalink: p.permalink || null, post_error: null });
+    // Free the storage, unless YouTube still needs the file.
+    await cleanupIfDone(env, row.id);
   }
 }
 
-export async function runPublisher(env: Env): Promise<{ processed: number; refreshed: number }> {
+export async function runPublisher(env: Env): Promise<{ processed: number; refreshed: number; youtube: number }> {
   const refreshed = await refreshTokens(env);
   const { results } = await env.DB.prepare(
     `SELECT id, user_id, format, caption, media, cover_ms, post_state, ig_children, ig_container_id, post_attempts FROM items
@@ -103,5 +101,6 @@ export async function runPublisher(env: Env): Promise<{ processed: number; refre
       }
     }
   }
-  return { processed: results.length, refreshed };
+  const youtube = await runYouTube(env);
+  return { processed: results.length, refreshed, youtube };
 }

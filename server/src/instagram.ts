@@ -56,7 +56,9 @@ export async function startConnect(env: Env, userId: string): Promise<string> {
 
 /** Instagram sends the user back here; trade the code for a 60-day token and save it. */
 export async function finishConnect(env: Env, code: string, state: string): Promise<{ username: string }> {
-  const row = await env.DB.prepare("SELECT user_id, created_at FROM oauth_states WHERE state = ?").bind(state).first<{ user_id: string; created_at: number }>();
+  // YouTube logins (y_…) share the table; they're never valid here.
+  const row = state.startsWith("y_") ? null
+    : await env.DB.prepare("SELECT user_id, created_at FROM oauth_states WHERE state = ?").bind(state).first<{ user_id: string; created_at: number }>();
   if (!row || row.created_at < nowSec() - 3600) throw new HttpError(400, "expired", "That Instagram login expired. Start again from the app.");
   await env.DB.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
   if (unified(env)) return finishUnified(env, row.user_id, code);
