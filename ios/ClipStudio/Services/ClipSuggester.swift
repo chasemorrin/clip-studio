@@ -41,7 +41,7 @@ enum ClipSuggester {
         You are the video editor for a jazz pianist's Instagram. You pick the strongest short clips from longer performance footage.
 
         About him, in his words: "\(Config.profile)"
-
+        \(IdeaLink.brief.map { "\nThis post is for an idea he planned. Pick the clips that fit it best, and write captions for it:\n\($0)\n" } ?? "")
         How to pick and cut (learned from his feedback):
         - Start and end every clip on one of the listed breath times (quiet dips between phrases) whenever possible. Never cut mid-phrase.
         - Phone audio is compressed, so loudness alone won't show the climax. Use musical activity, the camera sections, and what the frames show (a piano solo close-up, dancers, the full band).

@@ -7,7 +7,8 @@ struct ManualVideoView: View {
     let assetID: String?
 
     @State private var analysis: VideoAnalysis?
-    @State private var clip = ClipSuggestion(start: 0, end: 1, title: "", why: "", onScreenText: "", caption: "", hashtags: [])
+    @State private var clip = ClipSuggestion(start: 0, end: 1, title: IdeaLink.title ?? "", why: "", onScreenText: "",
+                                             caption: IdeaLink.caption ?? "", hashtags: [])
     @State private var status = "Opening the video…"
     @State private var progress: Double?
     @State private var failure: String?

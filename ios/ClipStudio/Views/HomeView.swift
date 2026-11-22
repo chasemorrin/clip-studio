@@ -53,6 +53,7 @@ struct OpenSaved: Hashable {
 struct HomeView: View {
     @EnvironmentObject var session: SessionStore
     @ObservedObject private var store = ProjectStore.shared
+    @ObservedObject private var ideaLink = IdeaLink.shared
     @State private var openSaved: OpenSaved?
     @State private var confirmDelete: SavedProject?
     @AppStorage("pickMode") private var modeRaw = PickMode.claude.rawValue
@@ -77,6 +78,19 @@ struct HomeView: View {
                 Image(systemName: "film.stack")
                     .font(.system(size: 56, weight: .light))
                     .foregroundStyle(Theme.accent)
+                if let idea = ideaLink.idea {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "lightbulb.fill").foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Making a post for your idea").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(idea.title.isEmpty ? "Untitled idea" : idea.title).font(.subheadline.weight(.semibold))
+                        }
+                        Spacer()
+                        Button("Cancel") { ideaLink.finish() }.font(.subheadline)
+                    }
+                    .padding(12)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                }
                 VStack(spacing: 8) {
                     Text("Make a post")
                         .font(.title2.weight(.semibold))

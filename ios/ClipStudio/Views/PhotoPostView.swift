@@ -141,8 +141,8 @@ struct PhotoPostView: View {
     @State private var shape: PhotoShape = .portrait
     @State private var crops: [PhotoCrop] = []
     @State private var current = 0
-    @State private var title = ""
-    @State private var caption = ""
+    @State private var title = IdeaLink.title ?? ""
+    @State private var caption = IdeaLink.caption ?? ""
     @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var earliest = Date()

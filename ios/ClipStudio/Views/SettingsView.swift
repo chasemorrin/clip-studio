@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var youtubeError: String?
     @State private var confirmYouTubeDisconnect = false
     @AppStorage("youtubeByDefault") private var youtubeByDefault = true
+    @State private var storage: StorageUsage.Report?
+    @State private var clearing = false
 
     // Calendar weekday numbers in Monday-first order (1 = Sunday).
     private let weekdays = [2, 3, 4, 5, 6, 7, 1]
@@ -23,6 +25,37 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    LabeledContent("Used on this iPhone") {
+                        if let storage { Text(StorageUsage.format(storage.total)).font(.headline) } else { ProgressView() }
+                    }
+                    if let storage {
+                        LabeledContent("Saved footage", value: StorageUsage.format(storage.saved))
+                        LabeledContent("Temporary video files", value: StorageUsage.format(storage.temporary))
+                        LabeledContent("App data", value: StorageUsage.format(storage.other))
+                        if storage.temporary > 20_000_000 {
+                            Button {
+                                Task {
+                                    clearing = true
+                                    await Task.detached { StorageUsage.clearTemporary() }.value
+                                    await measureStorage()
+                                    clearing = false
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Clear temporary video files")
+                                    if clearing { Spacer(); ProgressView() }
+                                }
+                            }
+                            .disabled(clearing)
+                        }
+                    }
+                } header: {
+                    Text("Storage")
+                } footer: {
+                    Text("Temporary files are copies of videos picked from Photos and exported clips. Clearing them is safe; saved footage reopens from Photos.")
+                }
+
                 Section {
                     if let name = session.instagramUsername {
                         LabeledContent("Connected", value: "@\(name)")
@@ -144,6 +177,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showTokenSheet) { TokenConnectSheet() }
             .task { await session.refreshProfile() }
+            .task { await measureStorage() }
             .confirmationDialog("Disconnect Instagram?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
                     Task {
@@ -194,6 +228,10 @@ struct SettingsView: View {
         } catch {
             instagramError = error.localizedDescription
         }
+    }
+
+    private func measureStorage() async {
+        storage = await Task.detached { StorageUsage.measure() }.value
     }
 
     private func connectYouTube() async {

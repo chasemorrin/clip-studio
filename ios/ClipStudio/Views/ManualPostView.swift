@@ -47,8 +47,8 @@ struct ManualPostView: View {
 
     @EnvironmentObject var posts: PostsStore
     @EnvironmentObject var session: SessionStore
-    @State private var title = ""
-    @State private var caption = ""
+    @State private var title = IdeaLink.title ?? ""
+    @State private var caption = IdeaLink.caption ?? ""
     @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var autoPost = true

@@ -15,6 +15,8 @@ struct Post: Identifiable, Hashable {
     let id: String
     var title: String
     var caption: String
+    var notes: String = ""
+    var createdAt: Date?
     var date: String
     var status: String
     var format: String
@@ -61,6 +63,8 @@ struct Post: Identifiable, Hashable {
         self.id = id
         title = d["title"] as? String ?? ""
         caption = d["caption"] as? String ?? ""
+        notes = d["notes"] as? String ?? ""
+        createdAt = (d["createdAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
         date = d["date"] as? String ?? ""
         status = d["status"] as? String ?? "idea"
         format = d["format"] as? String ?? "reel"
@@ -156,12 +160,35 @@ final class PostsStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
 
+    /// Ideas: posts with no time yet, newest first.
+    var ideas: [Post] {
+        posts.filter { $0.publishAt == nil }
+            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+    }
+
+    @discardableResult
+    func createIdea(title: String, notes: String, caption: String = "", format: String = "reel") async throws -> String {
+        let r = try await APIClient.shared.request("POST", "v1/items", json: [
+            "title": String(title.prefix(300)), "notes": notes, "caption": caption,
+            "format": format, "status": "idea", "pillar": "idea",
+        ])
+        await refresh()
+        return (r["item"] as? [String: Any])?["id"] as? String ?? ""
+    }
+
+    func updateIdea(_ idea: Post, title: String, notes: String, caption: String, format: String, status: String) async throws {
+        try await APIClient.shared.request("PATCH", "v1/items/\(idea.id)", json: [
+            "title": title, "notes": notes, "caption": caption, "format": format, "status": status,
+        ])
+        await refresh()
+    }
+
     var upcoming: [Post] {
         posts.filter { $0.publishAt != nil && !$0.isFullyPosted }.sorted { ($0.publishAt ?? .distantFuture) < ($1.publishAt ?? .distantFuture) }
     }
 
     var recentlyPosted: [Post] {
-        posts.filter { $0.isFullyPosted }.sorted { ($0.publishAt ?? .distantPast) > ($1.publishAt ?? .distantPast) }
+        posts.filter { $0.isFullyPosted && $0.publishAt != nil }.sorted { ($0.publishAt ?? .distantPast) > ($1.publishAt ?? .distantPast) }
     }
 
     /// Days that already have something scheduled (so new clips go to open days).
@@ -252,6 +279,16 @@ final class PostsStore: ObservableObject {
         if youtube { body["youtube"] = true }
         if let youtubeTitle, !youtubeTitle.isEmpty { body["ytTitle"] = String(youtubeTitle.prefix(100)) }
         if let plan { body["plan"] = plan }
+        // Made from an idea (Ideas → Add media): the idea becomes this post, keeping its title and breakdown.
+        if let idea = IdeaLink.shared.idea {
+            body["title"] = idea.title.isEmpty ? title : idea.title
+            body["notes"] = idea.notes
+            body["status"] = "planned"
+            try await APIClient.shared.request("PATCH", "v1/items/\(idea.id)", json: body)
+            IdeaLink.shared.finish()
+            await refresh()
+            return idea.id
+        }
         let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""
@@ -501,5 +538,36 @@ final class InstagramConnector: NSObject, ASWebAuthenticationPresentationContext
                 cont.resume(throwing: APIError(code: "connect_failed", message: "Couldn't open the \(service) login. Try again."))
             }
         }
+    }
+}
+
+
+/// "Add media" on an idea: the Clips tab makes the post for that idea, and the first post scheduled
+/// from it turns the idea into that post.
+@MainActor
+final class IdeaLink: ObservableObject {
+    static let shared = IdeaLink()
+    @Published private(set) var idea: Post?
+    /// Asks the app to switch to the Clips tab.
+    @Published var openClips = false
+
+    /// The idea's brief and caption, for Claude's clip picks while making the post (read off the main thread).
+    nonisolated(unsafe) static var brief: String?
+    nonisolated(unsafe) static var caption: String?
+    nonisolated(unsafe) static var title: String?
+
+    func start(_ idea: Post) {
+        self.idea = idea
+        Self.brief = "\(idea.title)\n\(idea.notes)"
+        Self.caption = idea.caption.isEmpty ? nil : idea.caption
+        Self.title = idea.title.isEmpty ? nil : idea.title
+        openClips = true
+    }
+
+    func finish() {
+        idea = nil
+        Self.brief = nil
+        Self.caption = nil
+        Self.title = nil
     }
 }

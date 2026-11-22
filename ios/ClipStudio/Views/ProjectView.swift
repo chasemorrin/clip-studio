@@ -92,6 +92,8 @@ final class ProjectModel: ObservableObject {
     func onDevice() {
         guard let a = analysis else { return }
         clips = ClipSuggester.fallback(a)
+        // Making a post for an idea: start from the idea's caption.
+        if let caption = IdeaLink.caption { for i in clips.indices { clips[i].caption = caption } }
         note = clips.isEmpty ? "No clear phrases found. Try Claude, or a longer video." : "Picked from the audio alone, on your phone."
         phase = .ready
         persist()

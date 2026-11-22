@@ -33,6 +33,7 @@ struct RootView: View {
 
 struct MainTabs: View {
     @State private var tab = 0
+    @ObservedObject private var ideaLink = IdeaLink.shared
 
     var body: some View {
         TabView(selection: $tab) {
@@ -42,9 +43,16 @@ struct MainTabs: View {
             CalendarView()
                 .tabItem { Label("Calendar", systemImage: "calendar") }
                 .tag(1)
+            IdeasView()
+                .tabItem { Label("Ideas", systemImage: "lightbulb") }
+                .tag(2)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(2)
+                .tag(3)
+        }
+        // "Add media" on an idea opens the Clips tab.
+        .onChange(of: ideaLink.openClips) { _, open in
+            if open { tab = 0; ideaLink.openClips = false }
         }
         // Tapping the home-screen widget opens the Calendar.
         .onOpenURL { url in
