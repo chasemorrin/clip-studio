@@ -6,6 +6,8 @@ import SwiftUI
 struct CalendarView: View {
     @EnvironmentObject var posts: PostsStore
     @State private var editing: Post?
+    @State private var swapTarget: String?
+    @State private var swapError: String?
 
     private struct DayGroup: Identifiable {
         let day: Date
@@ -66,12 +68,23 @@ struct CalendarView: View {
                     }
                     .listRowBackground(Color.clear)
                 }
+                if posts.upcoming.count > 1 {
+                    Text("Touch and hold a post, then drag it onto another to swap their times.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 0, trailing: 4))
+                }
                 ForEach(groups) { group in
                     Section(group.day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
                         ForEach(group.posts) { post in
-                            PostRow(post: post)
-                                .contentShape(Rectangle())
+                            swappable(PostRow(post: post).contentShape(Rectangle()), post: post)
                                 .onTapGesture { if post.isEditable { editing = post } }
+                                .listRowBackground(swapTarget == post.id ? Theme.accent.opacity(0.25) : nil)
+                                .dropDestination(for: String.self) { ids, _ in
+                                    swap(ids.first, onto: post)
+                                } isTargeted: { on in
+                                    if on { swapTarget = post.id } else if swapTarget == post.id { swapTarget = nil }
+                                }
                                 .swipeActions(edge: .leading) {
                                     if post.isEditable {
                                         Button { Task { await posts.postNow(post) } } label: { Label("Post now", systemImage: "paperplane.fill") }
@@ -101,6 +114,47 @@ struct CalendarView: View {
                 }
             }
             .refreshable { await posts.refresh() }
+            .alert("Can't swap these posts", isPresented: Binding(get: { swapError != nil }, set: { if !$0 { swapError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(swapError ?? "")
+            }
+    }
+
+    /// Posts that can still change can be picked up and dropped on another post.
+    @ViewBuilder
+    private func swappable(_ row: some View, post: Post) -> some View {
+        if post.isEditable {
+            row.draggable(post.id) {
+                Text(post.title.isEmpty ? "Untitled" : post.title)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(.white)
+                    .background(post.displayColor, in: Capsule())
+            }
+        } else {
+            row
+        }
+    }
+
+    /// Drop one post on another: they trade dates and times.
+    private func swap(_ id: String?, onto target: Post) -> Bool {
+        swapTarget = nil
+        guard let id, id != target.id, let dragged = posts.posts.first(where: { $0.id == id }) else { return false }
+        guard dragged.isEditable, target.isEditable else {
+            swapError = "Posts that are posting or already posted can't be moved."
+            return false
+        }
+        let soon = Date().addingTimeInterval(120)
+        guard (dragged.publishAt ?? .distantPast) > soon, (target.publishAt ?? .distantPast) > soon else {
+            swapError = "One of these posts' times has already passed. Open it and pick a new time instead."
+            return false
+        }
+        Task {
+            do { try await posts.swapTimes(dragged, target) } catch { swapError = error.localizedDescription }
+        }
+        return true
     }
 }
 
@@ -190,11 +244,6 @@ struct PostEditSheet: View {
     /// The latest copy from the server (it changes after re-editing the clip).
     private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
 
-    /// Post now goes to Instagram unless it's already there, and to YouTube when it's switched on and not up yet.
-    private var igNow: Bool { session.instagramUsername != nil && current.state != .posted }
-    private var ytNow: Bool { youtube && session.youtubeChannel != nil && current.youtube.state != .posted && current.hasVideo }
-    private var canPostNow: Bool { igNow || ytNow }
-
     /// True when the date picker is on a different day than the post's saved day.
     private var movedDay: Bool {
         guard let at = current.publishAt else { return true }
@@ -219,50 +268,20 @@ struct PostEditSheet: View {
                 Section("Title") {
                     TextField("Title", text: $title)
                 }
-                Section {
-                    DatePicker("Post on", selection: $when, in: earliest..., displayedComponents: [.date, .hourAndMinute])
-                    Toggle("Post to Instagram automatically", isOn: $autoPost)
-                        .disabled(session.instagramUsername == nil || current.state == .posted)
-                } footer: {
-                    if current.state == .posted { Text("Already on Instagram.") }
-                    else if session.instagramUsername == nil { Text("Connect Instagram in Settings to post automatically.") }
-                }
-                if current.hasVideo || current.youtube.isOn {
-                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube,
-                                          locked: current.youtube.state == .posted)
-                }
+                WhenSection(when: $when, earliest: earliest, excluding: post.id)
                 if movedDay {
                     PushBackSection(day: when, excluding: post.id, isOn: $pushBack)
+                }
+                InstagramPostSection(autoPost: $autoPost, post: current, busy: saving,
+                                     postNow: { Task { await postNow(.instagram) } })
+                if current.hasVideo || current.youtube.isOn {
+                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube, busy: saving,
+                                          postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil)
                 }
                 Section("Caption") {
                     CaptionEditor(text: $caption, minHeight: 140)
                     if caption.contains("[") {
                         Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                if canPostNow {
-                    Section {
-                        Button {
-                            Task {
-                                saving = true
-                                defer { saving = false }
-                                do {
-                                    try await posts.update(current, title: title, publishAt: Date().addingTimeInterval(60), caption: caption,
-                                                           autoPost: igNow, youtube: ytNow, youtubeTitle: youtubeTitle)
-                                    let latest = posts.posts.first { $0.id == post.id } ?? current
-                                    try await posts.postNow(id: post.id, instagram: igNow && latest.state != .posted, youtube: ytNow)
-                                    dismiss()
-                                } catch {
-                                    self.error = error.localizedDescription
-                                }
-                            }
-                        } label: {
-                            Label(igNow && ytNow ? "Post to Instagram and YouTube now" : ytNow ? "Post to YouTube now" : "Post to Instagram now",
-                                  systemImage: "paperplane.fill")
-                        }
-                        .disabled(saving)
-                    } footer: {
-                        Text("Saves your changes and posts right away. Usually live within 1–3 minutes.")
                     }
                 }
                 if !current.media.isEmpty {
@@ -322,6 +341,20 @@ struct PostEditSheet: View {
 }
 
 extension PostEditSheet {
+    /// Saves the changes, then posts to one platform right away. The other keeps its scheduled time.
+    func postNow(_ target: PostNowTarget) async {
+        saving = true
+        defer { saving = false }
+        do {
+            try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
+                                   youtube: session.youtubeChannel != nil ? youtube : nil, youtubeTitle: youtubeTitle)
+            try await posts.postNow(id: post.id, instagram: target == .instagram, youtube: target == .youtube)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     func saveToPhotos() async {
         savingToPhotos = true
         defer { savingToPhotos = false }

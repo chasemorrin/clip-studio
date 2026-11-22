@@ -3,7 +3,7 @@ import CoreGraphics
 
 /// How the source footage sits inside the vertical 1080×1920 frame.
 /// The editor preview and the export both use this, so what you see is what you get.
-struct Framing: Hashable {
+struct Framing: Hashable, Codable {
     /// 1 = the whole picture is visible (black bars if the shape differs). Higher = zoomed in and cropped.
     var zoom: Double = 1
     /// Shift from center, in output pixels (positive = right / down).

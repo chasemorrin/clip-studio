@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 
 struct ClipSuggestion: Identifiable, Hashable {
-    let id = UUID()
+    var id = UUID()
     var start: Double
     var end: Double
     var title: String
@@ -17,6 +17,14 @@ struct ClipSuggestion: Identifiable, Hashable {
     var scheduledFor: Date? = nil
 
     var length: Double { end - start }
+}
+
+/// Saved with the project so its clips come back after leaving the screen. The exported file
+/// (renderedURL) lives in a temporary folder, so it isn't saved; it's made again when needed.
+extension ClipSuggestion: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, start, end, title, why, onScreenText, caption, hashtags, keep, fromClaude, framing, scheduledFor
+    }
 }
 
 func timecode(_ t: Double, tenths: Bool = false) -> String {

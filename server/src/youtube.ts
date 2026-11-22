@@ -206,7 +206,7 @@ export async function runYouTube(env: Env): Promise<number> {
 
   const { results } = await env.DB.prepare(
     `SELECT id, user_id, title, yt_title, caption, media, yt_attempts FROM items
-     WHERE yt_state = 'queued' AND publish_at <= ? ORDER BY publish_at LIMIT 5`
+     WHERE yt_state = 'queued' AND COALESCE(yt_due_at, publish_at) <= ? ORDER BY publish_at LIMIT 5`
   ).bind(now).all<Row>();
   let done = 0;
   for (const row of results) {

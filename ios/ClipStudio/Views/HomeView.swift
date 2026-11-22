@@ -44,8 +44,17 @@ enum PickMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// A saved project to open, with the video file if it's already been loaded.
+struct OpenSaved: Hashable {
+    let project: SavedProject
+    var url: URL? = nil
+}
+
 struct HomeView: View {
     @EnvironmentObject var session: SessionStore
+    @ObservedObject private var store = ProjectStore.shared
+    @State private var openSaved: OpenSaved?
+    @State private var confirmDelete: SavedProject?
     @AppStorage("pickMode") private var modeRaw = PickMode.claude.rawValue
     @State private var pick: PhotosPickerItem?
     @State private var manualPicks: [PhotosPickerItem] = []
@@ -60,8 +69,8 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
+          ScrollView {
             VStack(spacing: 24) {
-                Spacer()
                 Image(systemName: "film.stack")
                     .font(.system(size: 56, weight: .light))
                     .foregroundStyle(Theme.accent)
@@ -100,12 +109,22 @@ struct HomeView: View {
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
                 }
-                Spacer()
+                if !store.projects.isEmpty { savedList }
             }
             .padding(.horizontal, 24)
+            .padding(.top, 28)
+            .padding(.bottom, 40)
+          }
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
+            .navigationDestination(item: $openSaved) { o in ProjectView(saved: o.project, url: o.url) }
+            .confirmationDialog("Remove this video's clips?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
+                                titleVisibility: .visible, presenting: confirmDelete) { p in
+                Button("Remove", role: .destructive) { store.delete(p.id) }
+            } message: { _ in
+                Text("The video stays in Photos and anything already scheduled stays on your calendar.")
+            }
             .navigationDestination(item: $manualVideo) { f in ManualVideoView(url: f.url, assetID: f.assetID) }
             .navigationDestination(item: $photos) { p in PhotoPostView(images: p.images) }
             .navigationDestination(item: $mixed) { m in ManualPostView(items: m.items) }
@@ -119,6 +138,54 @@ struct HomeView: View {
             }
             .task { await session.refreshProfile() }
         }
+    }
+
+    /// Videos you've already found clips in.
+    private var savedList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your footage").font(.headline).padding(.top, 8)
+            ForEach(store.projects) { p in
+                Button { openSaved = OpenSaved(project: p) } label: { savedRow(p) }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Remove", systemImage: "trash", role: .destructive) { confirmDelete = p }
+                    }
+            }
+            Text("Touch and hold a video to remove it.").font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func savedRow(_ p: SavedProject) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let img = store.thumbnail(for: p.id) {
+                    Image(uiImage: img).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "film").foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 54, height: 72)
+            .background(Color.secondary.opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(p.name) · \(timecode(p.duration))").font(.subheadline.weight(.semibold))
+                Text(summary(p)).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
+    }
+
+    private func summary(_ p: SavedProject) -> String {
+        var parts = ["\(p.clipCount) clip\(p.clipCount == 1 ? "" : "s")"]
+        let waiting = max(0, p.keptCount - p.scheduledCount)
+        if waiting > 0 { parts.append("\(waiting) kept, not scheduled") }
+        if p.scheduledCount > 0 { parts.append("\(p.scheduledCount) scheduled") }
+        return parts.joined(separator: " · ")
     }
 
     private func buttonLabel(_ text: String) -> some View {
@@ -137,7 +204,12 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            footage = Footage(url: movie.url, useClaude: mode == .claude, assetID: item.itemIdentifier)
+            // Already found clips in this video: open those instead of starting over.
+            if let id = item.itemIdentifier, let saved = store.project(forAsset: id) {
+                openSaved = OpenSaved(project: saved, url: movie.url)
+            } else {
+                footage = Footage(url: movie.url, useClaude: mode == .claude, assetID: item.itemIdentifier)
+            }
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
         }

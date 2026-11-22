@@ -4,9 +4,12 @@ import SwiftUI
 final class ProjectModel: ObservableObject {
     enum Phase: Equatable { case analyzing, suggesting, ready, failed(String) }
 
-    let url: URL
+    private(set) var url: URL?
     let useClaude: Bool
     let assetID: String?
+    /// Saved projects keep their clips between visits (only videos from the photo library can be reopened).
+    let projectID: UUID
+    private let saved: SavedProject?
     @Published var phase: Phase = .analyzing
     @Published var progress: Double = 0
     @Published var progressLabel = "Getting ready…"
@@ -18,11 +21,26 @@ final class ProjectModel: ObservableObject {
         self.url = url
         self.useClaude = useClaude
         self.assetID = assetID
+        projectID = UUID()
+        saved = nil
     }
+
+    /// Reopens a saved project. Pass the video's file if it's already at hand; otherwise it's loaded from Photos.
+    init(saved: SavedProject, url: URL? = nil) {
+        self.url = url
+        useClaude = saved.useClaude
+        assetID = saved.assetID
+        projectID = saved.id
+        self.saved = saved
+    }
+
+    var canSave: Bool { assetID != nil }
 
     func start() async {
         guard analysis == nil else { return }
         phase = .analyzing
+        if let saved { return await reopen(saved) }
+        guard let url else { return }
         do {
             var a = try await VideoAnalyzer.analyze(url: url) { [weak self] p, label in
                 Task { @MainActor in
@@ -38,11 +56,45 @@ final class ProjectModel: ObservableObject {
         }
     }
 
+    private func reopen(_ saved: SavedProject) async {
+        progressLabel = "Opening the video…"
+        progress = 0
+        do {
+            let file: URL
+            if let url { file = url } else { file = try await SourceVideo.load(assetId: saved.assetID) }
+            url = file
+            if let a = ProjectStore.shared.analysis(for: saved, url: file) {
+                analysis = a
+            } else {
+                var a = try await VideoAnalyzer.analyze(url: file) { [weak self] p, label in
+                    Task { @MainActor in
+                        self?.progress = p
+                        self?.progressLabel = label
+                    }
+                }
+                a.sourceAssetID = saved.assetID
+                analysis = a
+            }
+            clips = ProjectStore.shared.clips(for: saved.id) ?? []
+            note = saved.note
+            phase = .ready
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Saves the clips (and their keep / scheduled marks) so they're there next time.
+    func persist() {
+        guard phase == .ready, let a = analysis, let assetID else { return }
+        ProjectStore.shared.save(id: projectID, assetID: assetID, useClaude: useClaude, analysis: a, clips: clips, note: note)
+    }
+
     func onDevice() {
         guard let a = analysis else { return }
         clips = ClipSuggester.fallback(a)
         note = clips.isEmpty ? "No clear phrases found. Try Claude, or a longer video." : "Picked from the audio alone, on your phone."
         phase = .ready
+        persist()
     }
 
     func suggest() async {
@@ -56,6 +108,7 @@ final class ProjectModel: ObservableObject {
             note = "Claude couldn't pick clips (\(error.localizedDescription)) These picks come from the audio alone."
         }
         phase = .ready
+        persist()
     }
 }
 
@@ -65,6 +118,10 @@ struct ProjectView: View {
 
     init(url: URL, useClaude: Bool, assetID: String? = nil) {
         _model = StateObject(wrappedValue: ProjectModel(url: url, useClaude: useClaude, assetID: assetID))
+    }
+
+    init(saved: SavedProject, url: URL? = nil) {
+        _model = StateObject(wrappedValue: ProjectModel(saved: saved, url: url))
     }
 
     var body: some View {
@@ -87,6 +144,7 @@ struct ProjectView: View {
         .navigationTitle("Suggested clips")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.start() }
+        .onChange(of: model.clips) { _, _ in model.persist() }
         .sheet(isPresented: $showBatch) {
             if let a = model.analysis { BatchScheduleSheet(model: model, analysis: a) }
         }
@@ -113,7 +171,14 @@ struct ProjectView: View {
                     LabeledContent("Camera shots", value: "\(a.sections.count)")
                     LabeledContent("Phrase breaths found", value: "\(a.breaths.count)")
                 } footer: {
-                    if let note = model.note { Text(note).foregroundStyle(model.useClaude ? .orange : .secondary) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let note = model.note { Text(note).foregroundStyle(model.useClaude ? .orange : .secondary) }
+                        if model.canSave {
+                            Text("Saved in the Clips tab, so you can come back to these clips anytime.")
+                        } else {
+                            Text("This video didn't come from your photo library, so these clips can't be saved for later.")
+                        }
+                    }
                 }
                 Section("Tap a clip to watch, adjust and export it") {
                     ForEach($model.clips) { $clip in

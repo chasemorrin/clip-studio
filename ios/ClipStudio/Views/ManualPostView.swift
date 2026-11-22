@@ -131,32 +131,19 @@ struct ManualPostView: View {
                 } footer: {
                     Text("Added at the end of the caption.")
                 }
-                Section {
-                    DatePicker("Post on", selection: $when, in: Date()..., displayedComponents: [.date, .hourAndMinute])
-                    Toggle("Post to Instagram automatically", isOn: $autoPost).disabled(!instagramConnected)
-                } header: {
-                    Text("When")
-                } footer: {
-                    if !instagramConnected { Text("Connect Instagram in Settings to post automatically.") }
-                }
-                if format == "reel" {
-                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle)
-                }
+                WhenSection(when: $when)
                 PushBackSection(day: when, isOn: $pushBack)
+                InstagramPostSection(autoPost: $autoPost, busy: working != nil,
+                                     postNow: { Task { await run(now: .instagram) } })
+                if format == "reel" {
+                    YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
+                                          postNow: { Task { await run(now: .youtube) } })
+                }
                 Section {
                     Button {
-                        Task { await run(postNow: false) }
+                        Task { await run(now: nil) }
                     } label: {
                         Label("Schedule", systemImage: "calendar.badge.plus")
-                    }
-                    if instagramConnected || toYouTube {
-                        Button {
-                            Task { await run(postNow: true) }
-                        } label: {
-                            Label(instagramConnected && toYouTube ? "Post to Instagram and YouTube now"
-                                  : toYouTube ? "Post to YouTube now" : "Post to Instagram now",
-                                  systemImage: "paperplane.fill")
-                        }
                     }
                 }
                 .disabled(working != nil)
@@ -184,7 +171,7 @@ struct ManualPostView: View {
         }
     }
 
-    private func run(postNow: Bool) async {
+    private func run(now: PostNowTarget?) async {
         error = nil
         var media: [(key: String, type: String)] = []
         do {
@@ -210,14 +197,19 @@ struct ManualPostView: View {
                     try? FileManager.default.removeItem(at: file)
                 }
             }
-            working = postNow ? "Sending to Instagram…" : "Scheduling…"
-            let at = postNow ? Date() : when
+            working = now == .instagram ? "Sending to Instagram…" : now == .youtube ? "Sending to YouTube…" : "Scheduling…"
             let name = title.isEmpty ? "Untitled post" : title
             let id = try await posts.create(title: name, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
-                                            media: media, at: at, autoPost: instagramConnected && (postNow || autoPost),
+                                            media: media, at: when, autoPost: instagramConnected && autoPost,
                                             youtube: toYouTube, youtubeTitle: youtubeTitle.isEmpty ? name : youtubeTitle)
-            if postNow { try await posts.postNow(id: id, instagram: instagramConnected, youtube: toYouTube) } else { await posts.pushBackAfterScheduling(pushBack, day: at, newID: id) }
-            finished = postNow ? "Posting to Instagram now" : "Scheduled for \(at.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+            switch now {
+            case .instagram: try await posts.postNow(id: id, instagram: true, youtube: false)
+            case .youtube: try await posts.postNow(id: id, instagram: false, youtube: true)
+            case nil: await posts.pushBackAfterScheduling(pushBack, day: when, newID: id)
+            }
+            finished = now == .instagram ? "Posting to Instagram now"
+                : now == .youtube ? "Posting to YouTube now"
+                : "Scheduled for \(when.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
         } catch {
             self.error = error.localizedDescription
         }

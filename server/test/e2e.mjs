@@ -327,6 +327,30 @@ try {
     const it = await itemById(r.json.item.id);
     assert.equal(it.youtube.state, "posted", JSON.stringify(it)); assert.equal(it.postState, null);
   });
+  await check("post one platform now while the other keeps its scheduled time", async () => {
+    const { key } = await clipOf(5000);
+    const later = Math.floor(Date.now() / 1000) + 2 * 86400;
+    const r = await api("POST", "/v1/items", { title: "Split", format: "reel", media: [{ key, type: "video" }], publishAt: later, autoPost: true, youtube: true });
+    const n = state.ytUploads.length;
+    const pn = await api("POST", `/v1/items/${r.json.item.id}/publish-now`, { instagram: false, youtube: true });
+    assert.equal(pn.json.item.publishAt, later, "the post keeps its date");
+    await sleep(1500); await tick();
+    let it = await itemById(r.json.item.id);
+    assert.equal(it.youtube.state, "posted", JSON.stringify(it)); assert.equal(state.ytUploads.length, n + 1);
+    assert.equal(it.postState, "queued", "Instagram still waits for its time"); assert.equal(it.publishAt, later);
+    // And the other way round: Instagram now, YouTube later.
+    const { key: k2 } = await clipOf(5000);
+    const r2 = await api("POST", "/v1/items", { title: "Split 2", format: "reel", media: [{ key: k2, type: "video" }], publishAt: later, autoPost: true, youtube: true });
+    await api("POST", `/v1/items/${r2.json.item.id}/publish-now`, { instagram: true, youtube: false });
+    await sleep(1500); await tick(); await tick(); await tick();
+    it = await itemById(r2.json.item.id);
+    assert.equal(it.postState, "posted", JSON.stringify(it)); assert.equal(it.youtube.state, "queued");
+    assert.equal(it.media.length, 1, "file kept for YouTube later");
+    // Changing the time puts both platforms back on the same schedule.
+    const moved = await api("PATCH", `/v1/items/${it.id}`, { publishAt: later + 3600 });
+    assert.equal(moved.status, 200);
+    assert.match(sql(`SELECT ig_due_at, yt_due_at FROM items WHERE id='${it.id}'`), /"yt_due_at": null/);
+  });
   await check("a revoked Google login fails with a reconnect message and can be retried", async () => {
     sql("UPDATE yt_accounts SET access_expires_at = 0, refresh_token = 'revoked'");
     const { key } = await clipOf(5000);

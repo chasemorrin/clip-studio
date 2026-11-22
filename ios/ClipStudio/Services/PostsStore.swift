@@ -323,6 +323,29 @@ final class PostsStore: ObservableObject {
         await refresh()
     }
 
+    /// Swaps two posts' dates and times. Shows the swap right away, then saves it.
+    func swapTimes(_ a: Post, _ b: Post) async throws {
+        guard let ta = a.publishAt, let tb = b.publishAt, a.id != b.id else { return }
+        for (id, t) in [(a.id, tb), (b.id, ta)] {
+            if let i = posts.firstIndex(where: { $0.id == id }) {
+                posts[i].publishAt = t
+                posts[i].date = PostingSchedule.dayKey(t)
+            }
+        }
+        do {
+            for (id, t) in [(a.id, tb), (b.id, ta)] {
+                try await APIClient.shared.request("PATCH", "v1/items/\(id)", json: [
+                    "publishAt": Int(t.timeIntervalSince1970),
+                    "date": PostingSchedule.dayKey(t),
+                ])
+            }
+        } catch {
+            await refresh()
+            throw error
+        }
+        await refresh()
+    }
+
     /// Upcoming posts already on this day (not yet posted), leaving out one post (the one being edited).
     func conflicts(on day: Date, excluding id: String? = nil) -> [Post] {
         upcoming.filter { p in

@@ -224,7 +224,7 @@ struct PhotoPostView: View {
                     }
                     HashtagField(text: $hashtags)
                     VStack(alignment: .leading, spacing: 8) {
-                        DatePicker("Post on", selection: $when, in: earliest..., displayedComponents: [.date, .hourAndMinute])
+                        PostDateField(date: $when, earliest: earliest)
                         Toggle("Post to Instagram automatically", isOn: $autoPost).disabled(!instagramConnected)
                         if !instagramConnected {
                             Text("Connect Instagram in Settings to post automatically.").font(.caption).foregroundStyle(.secondary)

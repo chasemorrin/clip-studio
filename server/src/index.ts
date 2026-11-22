@@ -174,7 +174,11 @@ async function applyFields(env: Env, uid: string, body: any, current: ItemRow | 
     }
     f.media = JSON.stringify(media);
   }
-  if ("publishAt" in body) f.publish_at = Number.isFinite(body.publishAt) ? Math.round(body.publishAt) : null;
+  if ("publishAt" in body) {
+    f.publish_at = Number.isFinite(body.publishAt) ? Math.round(body.publishAt) : null;
+    // A new time applies to both platforms again.
+    if (f.publish_at !== current?.publish_at) { f.ig_due_at = null; f.yt_due_at = null; }
+  }
   if ("ytTitle" in body) f.yt_title = typeof body.ytTitle === "string" ? body.ytTitle.slice(0, 100) : null;
 
   // YouTube: the app sends youtube true/false.
@@ -186,7 +190,7 @@ async function applyFields(env: Env, uid: string, body: any, current: ItemRow | 
         const media: { type: string }[] = JSON.parse((f.media as string) ?? current?.media ?? "[]");
         if (!publishAt) throw new HttpError(400, "no_time", "Pick a date and time to post.");
         if (!media.some((m) => m.type === "video")) throw new HttpError(400, "no_video", "YouTube Shorts needs a video. Photos can only go to Instagram.");
-        if (current?.yt_state !== "queued") { f.yt_state = "queued"; f.yt_error = null; f.yt_attempts = 0; }
+        if (current?.yt_state !== "queued") { f.yt_state = "queued"; f.yt_error = null; f.yt_attempts = 0; f.yt_due_at = null; }
       }
     } else if (current?.yt_state !== "posted") {
       f.yt_state = null; f.yt_error = null;
@@ -205,7 +209,7 @@ async function applyFields(env: Env, uid: string, body: any, current: ItemRow | 
       const media = JSON.parse((f.media as string) ?? current?.media ?? "[]");
       if (!publishAt) throw new HttpError(400, "no_time", "Pick a date and time to post.");
       if (!media.length) throw new HttpError(400, "no_media", "Attach a clip or photo before scheduling it to post.");
-      f.post_state = "queued"; f.post_error = null; f.post_attempts = 0; f.ig_container_id = null; f.ig_children = null;
+      f.post_state = "queued"; f.post_error = null; f.post_attempts = 0; f.ig_container_id = null; f.ig_children = null; f.ig_due_at = null;
     } else {
       f.post_state = null; f.post_error = null;
     }
@@ -453,14 +457,23 @@ app.post("/v1/items/:id/publish-now", async (c) => {
     throw new HttpError(409, "posted", "This post is already up.");
   }
   const now = nowSec();
-  await c.env.DB.prepare("UPDATE items SET publish_at=?, date=?, updated_at=? WHERE id=?")
-    .bind(now, new Date(now * 1000).toISOString().slice(0, 10), now, cur.id).run();
+  // If the other platform is still scheduled for later, leave the post's time alone and post just this
+  // platform now. Otherwise the whole post moves to now, as before.
+  const later = (cur.publish_at ?? 0) > now;
+  const otherWaits = later && ((!wantIg && cur.post_state === "queued") || (!wantYt && cur.yt_state === "queued"));
+  if (!otherWaits) {
+    await c.env.DB.prepare("UPDATE items SET publish_at=?, date=?, ig_due_at=NULL, yt_due_at=NULL, updated_at=? WHERE id=?")
+      .bind(now, new Date(now * 1000).toISOString().slice(0, 10), now, cur.id).run();
+  } else {
+    await c.env.DB.prepare("UPDATE items SET updated_at=? WHERE id=?").bind(now, cur.id).run();
+  }
   if (wantIg) {
-    await c.env.DB.prepare("UPDATE items SET post_state='queued', post_error=NULL, post_attempts=0, ig_container_id=NULL, ig_children=NULL WHERE id=?")
-      .bind(cur.id).run();
+    await c.env.DB.prepare("UPDATE items SET post_state='queued', post_error=NULL, post_attempts=0, ig_container_id=NULL, ig_children=NULL, ig_due_at=? WHERE id=?")
+      .bind(otherWaits ? now : null, cur.id).run();
   }
   if (wantYt) {
-    await c.env.DB.prepare("UPDATE items SET yt_state='queued', yt_error=NULL, yt_attempts=0 WHERE id=?").bind(cur.id).run();
+    await c.env.DB.prepare("UPDATE items SET yt_state='queued', yt_error=NULL, yt_attempts=0, yt_due_at=? WHERE id=?")
+      .bind(otherWaits ? now : null, cur.id).run();
   }
   // Instagram still needs a little time to process a video; the timer finishes anything not done within this request.
   c.executionCtx.waitUntil((async () => {

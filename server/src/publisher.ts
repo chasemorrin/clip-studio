@@ -87,7 +87,7 @@ export async function runPublisher(env: Env): Promise<{ processed: number; refre
   const refreshed = await refreshTokens(env);
   const { results } = await env.DB.prepare(
     `SELECT id, user_id, format, caption, media, cover_ms, post_state, ig_children, ig_container_id, post_attempts FROM items
-     WHERE (post_state = 'queued' AND publish_at <= ?) OR post_state IN ('children', 'publishing')
+     WHERE (post_state = 'queued' AND COALESCE(ig_due_at, publish_at) <= ?) OR post_state IN ('children', 'publishing')
      ORDER BY publish_at LIMIT 25`
   ).bind(nowSec()).all<Row>();
   for (const row of results) {
