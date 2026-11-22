@@ -96,6 +96,17 @@ struct HomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let selected {
+                    Button {
+                        if mode == .manual {
+                            manualVideo = Footage(url: selected.url, useClaude: false, assetID: selected.assetID)
+                        } else {
+                            footage = Footage(url: selected.url, useClaude: mode == .claude, assetID: selected.assetID)
+                        }
+                    } label: {
+                        buttonLabel(mode == .manual ? "Edit this video" : "Find clips",
+                                    icon: mode == .manual ? "scissors" : mode == .claude ? "sparkles" : "waveform")
+                    }
+                    .buttonStyle(.borderedProminent)
                     VStack(alignment: .leading, spacing: 10) {
                         FootagePreview(url: selected.url)
                         if let saved = savedForSelected {
@@ -113,17 +124,6 @@ struct HomeView: View {
                             Label("Choose a different video", systemImage: "xmark.circle").font(.subheadline)
                         }
                     }
-                    Button {
-                        if mode == .manual {
-                            manualVideo = Footage(url: selected.url, useClaude: false, assetID: selected.assetID)
-                        } else {
-                            footage = Footage(url: selected.url, useClaude: mode == .claude, assetID: selected.assetID)
-                        }
-                    } label: {
-                        buttonLabel(mode == .manual ? "Edit this video" : "Find clips",
-                                    icon: mode == .manual ? "scissors" : mode == .claude ? "sparkles" : "waveform")
-                    }
-                    .buttonStyle(.borderedProminent)
                 } else {
                     Group {
                         if mode == .manual {
