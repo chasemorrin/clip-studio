@@ -55,7 +55,6 @@ struct HomeView: View {
     @ObservedObject private var store = ProjectStore.shared
     @State private var openSaved: OpenSaved?
     @State private var confirmDelete: SavedProject?
-    @AppStorage("pickMode") private var modeRaw = PickMode.claude.rawValue
     @State private var pick: PhotosPickerItem?
     @State private var manualPicks: [PhotosPickerItem] = []
     @State private var footage: Footage?
@@ -64,8 +63,6 @@ struct HomeView: View {
     @State private var mixed: ManualImport?
     @State private var loading = false
     @State private var error: String?
-
-    private var mode: PickMode { PickMode(rawValue: modeRaw) ?? .claude }
 
     var body: some View {
         NavigationStack {
@@ -82,28 +79,19 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Pick clips with").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                    Picker("Pick clips with", selection: $modeRaw) {
-                        ForEach(PickMode.allCases) { m in Text(m.label).tag(m.rawValue) }
+                VStack(spacing: 10) {
+                    PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
+                        buttonLabel(loading ? "Opening video…" : "Choose footage", icon: "video.badge.plus")
                     }
-                    .pickerStyle(.segmented)
-                    Text(mode.explanation)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Group {
-                    if mode == .manual {
-                        PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
-                            buttonLabel(loading ? "Opening…" : "Choose video or photos")
-                        }
-                    } else {
-                        PhotosPicker(selection: $pick, matching: .videos, photoLibrary: .shared()) {
-                            buttonLabel(loading ? "Opening video…" : "Choose footage")
-                        }
+                    .buttonStyle(.borderedProminent)
+                    Text("You can watch it first, then choose Claude, on-device or manual.")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    PhotosPicker(selection: $manualPicks, maxSelectionCount: 10, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
+                        buttonLabel("Post finished photos or videos", icon: "photo.on.rectangle.angled")
                     }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 6)
                 }
-                .buttonStyle(.borderedProminent)
                 .disabled(loading)
                 if loading { ProgressView() }
                 if let error {
@@ -117,7 +105,7 @@ struct HomeView: View {
           }
             .navigationTitle("Clip Studio")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
+            .navigationDestination(item: $footage) { f in FootagePreviewView(url: f.url, assetID: f.assetID) }
             .navigationDestination(item: $openSaved) { o in ProjectView(saved: o.project, url: o.url) }
             .confirmationDialog("Remove this video's clips?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                                 titleVisibility: .visible, presenting: confirmDelete) { p in
@@ -188,8 +176,8 @@ struct HomeView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func buttonLabel(_ text: String) -> some View {
-        Label(text, systemImage: mode == .manual ? "photo.on.rectangle.angled" : "video.badge.plus")
+    private func buttonLabel(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -204,12 +192,8 @@ struct HomeView: View {
                 error = "Couldn't open that video. If it's in iCloud, open it in Photos once so it downloads, then try again."
                 return
             }
-            // Already found clips in this video: open those instead of starting over.
-            if let id = item.itemIdentifier, let saved = store.project(forAsset: id) {
-                openSaved = OpenSaved(project: saved, url: movie.url)
-            } else {
-                footage = Footage(url: movie.url, useClaude: mode == .claude, assetID: item.itemIdentifier)
-            }
+            // Watch it first; the preview screen offers its saved clips if it's been scanned before.
+            footage = Footage(url: movie.url, useClaude: false, assetID: item.itemIdentifier)
         } catch {
             self.error = "Couldn't open that video: \(error.localizedDescription)"
         }
