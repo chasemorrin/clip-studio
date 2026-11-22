@@ -28,10 +28,11 @@ struct PostDateField: View {
                     .background(Color.secondary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $showCalendar, arrowEdge: .top) {
+            // No fixed arrow edge: iOS opens it above the date when there isn't room below.
+            .popover(isPresented: $showCalendar) {
                 MiniCalendar(date: $date, earliest: earliest, marked: markedDays) { showCalendar = false }
                     .padding(14)
-                    .frame(width: 330)
+                    .frame(width: 330, height: MiniCalendar.height + 28)
                     .presentationCompactAdaptation(.popover)
             }
             DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute)
@@ -52,6 +53,10 @@ struct MiniCalendar: View {
     private let cal = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
 
+    /// Always six rows, so the calendar is the same size every month and never gets squeezed.
+    static let rowHeight: CGFloat = 40
+    static let height: CGFloat = 30 + 6 + 16 + 6 + rowHeight * 6
+
     init(date: Binding<Date>, earliest: Date, marked: Set<String>, onPick: @escaping () -> Void) {
         _date = date
         self.earliest = earliest
@@ -65,13 +70,14 @@ struct MiniCalendar: View {
     private var cells: [Date?] {
         guard let range = cal.range(of: .day, in: .month, for: month) else { return [] }
         let lead = (cal.component(.weekday, from: month) - cal.firstWeekday + 7) % 7
-        return Array(repeating: nil, count: lead) + range.compactMap { cal.date(byAdding: .day, value: $0 - 1, to: month) }
+        let days: [Date?] = Array(repeating: nil, count: lead) + range.compactMap { cal.date(byAdding: .day, value: $0 - 1, to: month) }
+        return days + Array(repeating: nil, count: max(0, 42 - days.count))
     }
 
     var body: some View {
         VStack(spacing: 6) {
             HStack {
-                Text(month.formatted(.dateTime.month(.wide).year())).font(.headline)
+                Text(month.formatted(.dateTime.month(.wide).year())).font(.headline).lineLimit(1)
                 Spacer()
                 Button { shift(-1) } label: { Image(systemName: "chevron.left").frame(width: 34, height: 30) }
                     .disabled(month <= firstMonth)
@@ -79,18 +85,19 @@ struct MiniCalendar: View {
             }
             .font(.body.weight(.semibold))
             .tint(Theme.accent)
+            .frame(height: 30)
 
             HStack(spacing: 0) {
                 let symbols = cal.veryShortStandaloneWeekdaySymbols
                 let first = cal.firstWeekday - 1
                 ForEach(Array((symbols[first...] + symbols[..<first]).enumerated()), id: \.offset) { _, s in
-                    Text(s).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                    Text(s).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 16)
                 }
             }
 
             LazyVGrid(columns: columns, spacing: 0) {
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
-                    if let day { cell(day) } else { Color.clear.frame(height: 40) }
+                    if let day { cell(day) } else { Color.clear.frame(height: Self.rowHeight) }
                 }
             }
         }
@@ -116,7 +123,7 @@ struct MiniCalendar: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 40)
+            .frame(height: Self.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
