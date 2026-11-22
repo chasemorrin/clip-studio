@@ -205,7 +205,11 @@ struct YouTubeOptionsSection: View {
     var body: some View {
         Section {
             Toggle(isOn: $isOn) {
-                Label("Post automatically", systemImage: "play.rectangle")
+                Label {
+                    Text("Post automatically")
+                } icon: {
+                    Image(systemName: "play.rectangle").foregroundStyle(.red)
+                }
             }
             .tint(.red)
             .disabled(!connected || posted)
@@ -221,8 +225,8 @@ struct YouTubeOptionsSection: View {
             if let postNow, connected, !posted, status?.state != .uploading {
                 Button(action: postNow) {
                     Label("Post to YouTube now", systemImage: "paperplane.fill")
+                        .foregroundStyle(busy ? Color.secondary : Color.red)
                 }
-                .tint(.red)
                 .disabled(busy)
             }
         } header: {

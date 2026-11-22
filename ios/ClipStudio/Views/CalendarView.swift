@@ -5,6 +5,7 @@ import SwiftUI
 /// What's scheduled and what's been posted.
 struct CalendarView: View {
     @EnvironmentObject var posts: PostsStore
+    @EnvironmentObject var session: SessionStore
     @State private var editing: Post?
     @State private var swapTarget: String?
     @State private var swapError: String?
@@ -56,9 +57,10 @@ struct CalendarView: View {
     }
 
     private var listView: some View {
-            List {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 if let error = posts.error {
-                    Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                    Text(error).foregroundStyle(.red).font(.footnote)
                 }
                 if posts.upcoming.isEmpty && !posts.loading {
                     ContentUnavailableView {
@@ -66,59 +68,91 @@ struct CalendarView: View {
                     } description: {
                         Text("Make clips in the Clips tab, then tap Schedule.")
                     }
-                    .listRowBackground(Color.clear)
+                    .padding(.top, 40)
                 }
-                if posts.upcoming.count > 1 {
-                    Text("Touch and hold a post, then drag it onto another to swap their times.")
+                if !posts.upcoming.isEmpty {
+                    Text("Tap a post to edit it. Touch and hold for more options, or drag it onto another post to swap their times.")
                         .font(.caption).foregroundStyle(.secondary)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 0, trailing: 4))
+                        .padding(.horizontal, 4)
                 }
                 ForEach(groups) { group in
-                    Section(group.day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
-                        ForEach(group.posts) { post in
-                            swappable(PostRow(post: post).contentShape(Rectangle()), post: post)
-                                .onTapGesture { if post.isEditable { editing = post } }
-                                .listRowBackground(swapTarget == post.id ? Theme.accent.opacity(0.25) : nil)
-                                .dropDestination(for: String.self) { ids, _ in
-                                    swap(ids.first, onto: post)
-                                } isTargeted: { on in
-                                    if on { swapTarget = post.id } else if swapTarget == post.id { swapTarget = nil }
-                                }
-                                .swipeActions(edge: .leading) {
-                                    if post.isEditable {
-                                        Button { Task { await posts.postNow(post) } } label: { Label("Post now", systemImage: "paperplane.fill") }
-                                            .tint(Theme.accent)
-                                    }
-                                }
-                                .swipeActions(edge: .trailing) {
-                                    if post.state != .posting && post.youtube.state != .uploading {
-                                        Button(role: .destructive) { Task { await posts.delete(post) } } label: { Label("Delete", systemImage: "trash") }
-                                    }
-                                    if post.state == .scheduled {
-                                        Button { Task { await posts.setAutoPost(post, false) } } label: { Label("Don't post", systemImage: "pause") }
-                                            .tint(.gray)
-                                    }
-                                    if post.canRetry {
-                                        Button { Task { await posts.retry(post) } } label: { Label("Retry", systemImage: "arrow.clockwise") }
-                                            .tint(.blue)
-                                    }
-                                }
-                        }
+                    dayHeader(group.day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    ForEach(group.posts) { post in
+                        swappable(card(post), post: post)
+                            .dropDestination(for: String.self) { ids, _ in
+                                swap(ids.first, onto: post)
+                            } isTargeted: { on in
+                                if on { swapTarget = post.id } else if swapTarget == post.id { swapTarget = nil }
+                            }
                     }
                 }
                 if !posts.recentlyPosted.isEmpty {
-                    Section("Posted") {
-                        ForEach(posts.recentlyPosted.prefix(20)) { post in PostRow(post: post) }
-                    }
+                    dayHeader("Posted")
+                    ForEach(posts.recentlyPosted.prefix(20)) { post in card(post) }
                 }
             }
-            .refreshable { await posts.refresh() }
-            .alert("Can't swap these posts", isPresented: Binding(get: { swapError != nil }, set: { if !$0 { swapError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(swapError ?? "")
+            .padding(.horizontal)
+            .padding(.bottom, 24)
+        }
+        .refreshable { await posts.refresh() }
+        .alert("Can't swap these posts", isPresented: Binding(get: { swapError != nil }, set: { if !$0 { swapError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(swapError ?? "")
+        }
+    }
+
+    private func dayHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 14)
+            .padding(.leading, 4)
+    }
+
+    /// One post as a card: tap to edit, touch and hold for actions.
+    private func card(_ post: Post) -> some View {
+        let target = swapTarget == post.id
+        return PostRow(post: post)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(target ? Theme.accent.opacity(0.25) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(target ? Theme.accent : Color.clear, lineWidth: 2))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture { if post.isEditable { editing = post } }
+            .contextMenu { actions(post) }
+    }
+
+    @ViewBuilder
+    private func actions(_ post: Post) -> some View {
+        if post.isEditable {
+            Button("Edit", systemImage: "pencil") { editing = post }
+            if session.instagramUsername != nil, post.state != .posted {
+                Button("Post to Instagram now", systemImage: "paperplane.fill") { postNow(post, instagram: true) }
             }
+            if session.youtubeChannel != nil, post.hasVideo, post.youtube.state != .posted {
+                Button("Post to YouTube now", systemImage: "play.rectangle") { postNow(post, instagram: false) }
+            }
+            if post.canRetry {
+                Button("Retry", systemImage: "arrow.clockwise") { Task { await posts.retry(post) } }
+            }
+            if post.state == .scheduled {
+                Button("Don't post to Instagram", systemImage: "pause") { Task { await posts.setAutoPost(post, false) } }
+            }
+        }
+        if post.state != .posting && post.youtube.state != .uploading {
+            Button("Delete", systemImage: "trash", role: .destructive) { Task { await posts.delete(post) } }
+        }
+    }
+
+    private func postNow(_ post: Post, instagram: Bool) {
+        Task {
+            do {
+                try await posts.postNow(id: post.id, instagram: instagram, youtube: !instagram)
+            } catch {
+                posts.error = error.localizedDescription
+            }
+        }
     }
 
     /// Posts that can still change can be picked up and dropped on another post.
