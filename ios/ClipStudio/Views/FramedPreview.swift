@@ -47,14 +47,13 @@ struct FramedPreview: View {
                     .frame(width: placed.width * k, height: placed.height * k)
                     .position(x: placed.midX * k, y: placed.midY * k)
                     .allowsHitTesting(false)
-                if showText && !text.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text(text)
-                        .font(.system(size: ClipRenderer.textSize * k, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .shadow(color: .black.opacity(0.6), radius: 8 * k, y: 3 * k)
-                        .frame(width: (Framing.canvas.width - 140) * k, height: ClipRenderer.textSize * 2.6 * k, alignment: .top)
-                        .position(x: Framing.canvas.width / 2 * k, y: (300 + ClipRenderer.textSize * 1.3) * k)
+                // The same text image the export uses, scaled down.
+                if showText, let image = ClipRenderer.textImage(text) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .frame(width: image.size.width * k, height: image.size.height * k)
+                        .position(x: Framing.canvas.width / 2 * k,
+                                  y: (ClipRenderer.textTop - ClipRenderer.textPad + image.size.height / 2) * k)
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }

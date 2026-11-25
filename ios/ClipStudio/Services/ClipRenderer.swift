@@ -9,6 +9,51 @@ enum ClipRenderer {
     /// On-screen text size in output pixels, and how long it stays up.
     static let textSize: CGFloat = 76
     static let textSeconds: Double = 6.0
+    /// Where the text block starts from the top, and how wide it can be (output pixels).
+    static let textTop: CGFloat = 300
+    static let textMaxWidth: CGFloat = renderSize.width - 140
+    /// Room around the text in its image, for the shadow.
+    static let textPad: CGFloat = 28
+    private static let textCache = NSCache<NSString, UIImage>()
+
+    /// The on-screen text drawn as an image in output pixels: wrapped to the frame's width and, if it would
+    /// take more than three lines, made a little smaller until it fits. The editor preview shows this same
+    /// image, so what you see is what's exported.
+    static func textImage(_ text: String) -> UIImage? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let cached = textCache.object(forKey: trimmed as NSString) { return cached }
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineBreakMode = .byWordWrapping
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.6)
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = CGSize(width: 0, height: 3)
+        var size = textSize
+        var attributed = NSAttributedString()
+        var bounds = CGRect.zero
+        while true {
+            let font = UIFont.systemFont(ofSize: size, weight: .semibold)
+            attributed = NSAttributedString(string: trimmed, attributes: [
+                .font: font, .foregroundColor: UIColor.white, .paragraphStyle: para, .shadow: shadow,
+            ])
+            bounds = attributed.boundingRect(with: CGSize(width: textMaxWidth, height: .greatestFiniteMagnitude),
+                                             options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
+            if bounds.height <= font.lineHeight * 3 + 2 || size <= 44 { break }
+            size -= 4
+        }
+        let canvas = CGSize(width: textMaxWidth + textPad * 2, height: ceil(bounds.height) + textPad * 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: canvas, format: format).image { _ in
+            attributed.draw(with: CGRect(x: textPad, y: textPad, width: textMaxWidth, height: ceil(bounds.height) + 2),
+                            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
+        }
+        textCache.setObject(image, forKey: trimmed as NSString)
+        return image
+    }
 
     enum RenderError: LocalizedError {
         case cantRead, cantExport
@@ -199,24 +244,18 @@ enum ClipRenderer {
         let size = renderSize
         let parent = CALayer()
         parent.frame = CGRect(origin: .zero, size: size)
-        parent.isGeometryFlipped = true
         let videoLayer = CALayer()
         videoLayer.frame = parent.frame
         parent.addSublayer(videoLayer)
 
-        let label = CATextLayer()
-        label.string = NSAttributedString(string: text, attributes: [
-            .font: UIFont.systemFont(ofSize: textSize, weight: .semibold),
-            .foregroundColor: UIColor.white,
-        ])
-        label.alignmentMode = .center
-        label.isWrapped = true
-        label.contentsScale = 2
-        label.frame = CGRect(x: 70, y: 300, width: size.width - 140, height: textSize * 2.6)
-        label.shadowColor = UIColor.black.cgColor
-        label.shadowOpacity = 0.6
-        label.shadowRadius = 8
-        label.shadowOffset = CGSize(width: 0, height: 3)
+        // The text as a picture (wrapped and sized to fit). Video layers count y from the bottom.
+        let label = CALayer()
+        if let image = textImage(text) {
+            label.contents = image.cgImage
+            label.frame = CGRect(x: (size.width - image.size.width) / 2,
+                                 y: size.height - (textTop - textPad) - image.size.height,
+                                 width: image.size.width, height: image.size.height)
+        }
         label.opacity = 0
 
         // 0.3s wait, 0.5s fade in, hold, 0.5s fade out.

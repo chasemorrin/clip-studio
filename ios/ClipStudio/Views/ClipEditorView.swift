@@ -6,13 +6,21 @@ import SwiftUI
 final class LoopingPlayer: ObservableObject {
     let player = AVPlayer()
     @Published var currentTime: Double = 0
+    @Published private(set) var isPlaying = false
     private var start: Double = 0
+    private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
 
     func load(url: URL, start: Double, end: Double) {
         if player.currentItem == nil {
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        }
+        if statusObserver == nil {
+            statusObserver = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] p, _ in
+                let playing = p.timeControlStatus != .paused
+                Task { @MainActor in self?.isPlaying = playing }
+            }
         }
         if timeObserver == nil {
             timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0 / 30, preferredTimescale: 600), queue: .main) { [weak self] t in
@@ -61,6 +69,7 @@ final class LoopingPlayer: ObservableObject {
     }
 
     deinit {
+        statusObserver?.invalidate()
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
     }
@@ -109,6 +118,20 @@ struct ClipEditorView: View {
                     .frame(maxHeight: 460)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        // A big play button whenever it's paused.
+                        if !looper.isPlaying {
+                            Button { looper.togglePlay() } label: {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 30, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 72, height: 72)
+                                    .background(.black.opacity(0.45), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Play")
+                        }
+                    }
 
                 framingControls
 
@@ -122,6 +145,12 @@ struct ClipEditorView: View {
                 .frame(height: 72)
 
                 HStack(spacing: 10) {
+                    Button { looper.togglePlay() } label: {
+                        Label(looper.isPlaying ? "Pause" : "Play", systemImage: looper.isPlaying ? "pause.fill" : "play.fill")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 22)
+                    }
+                    .accessibilityLabel(looper.isPlaying ? "Pause" : "Play")
                     Button { looper.restart() } label: { Label("Hear the start", systemImage: "backward.end.fill") }
                     Button { looper.previewEnding(end: clip.end) } label: { Label("Hear the ending", systemImage: "forward.end.fill") }
                 }
@@ -146,7 +175,7 @@ struct ClipEditorView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Caption").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Instagram caption").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         Spacer()
                         Button("Copy caption") { UIPasteboard.general.string = clip.fullCaption; message = "Caption copied." }
                             .font(.footnote)
@@ -162,6 +191,21 @@ struct ClipEditorView: View {
                 HashtagField(text: $hashtagText)
                     .onAppear { hashtagText = DefaultHashtags.format(clip.hashtags) }
                     .onChange(of: hashtagText) { _, t in clip.hashtags = DefaultHashtags.parse(t) }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.rectangle.fill").foregroundStyle(.red)
+                        Text("YouTube title").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    TextField(clip.title.isEmpty ? "Title for the Short" : clip.title,
+                              text: Binding(get: { clip.youtubeTitle ?? "" },
+                                            set: { clip.youtubeTitle = $0.isEmpty ? nil : String($0.prefix(100)) }),
+                              axis: .vertical)
+                        .lineLimit(1...3)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Up to 100 characters. Leave empty to use the title above. The Short's description is the caption.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
 
                 Toggle("Keep this clip", isOn: $clip.keep)
 

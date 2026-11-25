@@ -338,16 +338,10 @@ struct PostEditSheet: View {
                     PushBackSection(day: when, excluding: post.id, isOn: $pushBack)
                 }
                 InstagramPostSection(autoPost: $autoPost, post: current, busy: saving,
-                                     postNow: { Task { await postNow(.instagram) } })
+                                     postNow: { Task { await postNow(.instagram) } }, caption: $caption)
                 if current.hasVideo || current.youtube.isOn {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube, busy: saving,
                                           postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil)
-                }
-                Section("Caption") {
-                    CaptionEditor(text: $caption, minHeight: 140)
-                    if caption.contains("[") {
-                        Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
-                    }
                 }
                 if !current.media.isEmpty {
                     Section {

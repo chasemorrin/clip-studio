@@ -35,15 +35,9 @@ struct ScheduleSheet: View {
                 WhenSection(when: $when, nextSlot: nextSlot)
                 PushBackSection(day: when, isOn: $pushBack)
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
-                                     postNow: { Task { await schedule(now: .instagram) } })
+                                     postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
                                       postNow: { Task { await schedule(now: .youtube) } })
-                Section("Caption") {
-                    Text(clip.fullCaption).font(.callout)
-                    if clip.caption.contains("[") {
-                        Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
-                    }
-                }
                 if let working {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -71,7 +65,7 @@ struct ScheduleSheet: View {
                 if let nextSlot { when = nextSlot }
                 autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
-                if youtubeTitle.isEmpty { youtubeTitle = clip.title }
+                if youtubeTitle.isEmpty { youtubeTitle = clip.youtubeTitle ?? clip.title }
             }
         }
     }
@@ -94,6 +88,7 @@ struct ScheduleSheet: View {
             progress = nil
             let id = try await posts.schedule(file: file, clip: clip, at: when, autoPost: instagramConnected && autoPost,
                                               youtube: toYouTube, youtubeTitle: youtubeTitle, sourceAssetID: analysis.sourceAssetID)
+            clip.youtubeTitle = youtubeTitle == clip.title ? nil : youtubeTitle
             switch now {
             case .instagram:
                 working = "Sending to Instagram…"
@@ -145,10 +140,35 @@ struct InstagramPostSection: View {
     var post: Post? = nil
     var busy = false
     var postNow: (() -> Void)? = nil
+    /// The caption, shown read-only (scheduling a clip: it's edited in the clip editor)…
+    var captionText: String? = nil
+    /// …or editable (the Calendar's edit page).
+    var caption: Binding<String>? = nil
     @EnvironmentObject var session: SessionStore
 
     private var connected: Bool { session.instagramUsername != nil }
     private var posted: Bool { post?.state == .posted }
+
+    @ViewBuilder
+    private var captionRow: some View {
+        if let caption {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Caption").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                CaptionEditor(text: caption, minHeight: 120)
+                if caption.wrappedValue.contains("[") {
+                    Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
+                }
+            }
+        } else if let captionText {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Caption").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(captionText).font(.callout)
+                if captionText.contains("[") {
+                    Text("Fill in the [brackets] before it posts.").font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
 
     var body: some View {
         Section {
@@ -156,6 +176,7 @@ struct InstagramPostSection: View {
                 Label("Post automatically", systemImage: "camera")
             }
             .disabled(!connected || posted)
+            captionRow
             if let post, post.state != .notAutoPosting {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -470,7 +491,8 @@ struct BatchScheduleSheet: View {
                 progress = nil
                 let when = times[c.id] ?? Date().addingTimeInterval(3600)
                 try await posts.schedule(file: file!, clip: model.clips[i], at: when, autoPost: autoPost && instagramConnected,
-                                         youtube: youtube && session.youtubeChannel != nil, sourceAssetID: analysis.sourceAssetID)
+                                         youtube: youtube && session.youtubeChannel != nil, youtubeTitle: model.clips[i].youtubeTitle,
+                                         sourceAssetID: analysis.sourceAssetID)
                 model.clips[i].scheduledFor = when
                 done += 1
             } catch {

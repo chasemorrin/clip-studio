@@ -124,7 +124,7 @@ struct ManualPostView: View {
                 Section {
                     CaptionEditor(text: $caption, minHeight: 120)
                 } header: {
-                    Text("Caption")
+                    Text("Instagram caption")
                 }
                 Section {
                     HashtagField(text: $hashtags)
