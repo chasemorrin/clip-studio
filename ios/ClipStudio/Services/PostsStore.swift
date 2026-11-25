@@ -217,7 +217,13 @@ final class PostsStore: ObservableObject {
                          autoPost: p.state == .scheduled || p.state == .posting || p.youtube.state == .scheduled || p.youtube.state == .uploading,
                          failed: p.state == .failed || p.youtube.state == .failed)
         }
-        let list = Array(next)
+        // Today's posts that already went out stay on the widget (in green) until midnight.
+        let postedToday = recentlyPosted.filter { p in p.publishAt.map { Calendar.current.isDateInToday($0) } ?? false }.map { p in
+            UpcomingPost(id: p.id, title: p.title, date: p.publishAt ?? Date(), format: p.format,
+                         autoPost: true, failed: false, posted: true)
+        }
+        let list = (postedToday + next).sorted { $0.date < $1.date }
+        WidgetSync.saveLogin(server: Config.serverURL, token: APIClient.shared.token)
         if list != UpcomingPosts.load() {
             UpcomingPosts.save(list)
             WidgetCenter.shared.reloadAllTimelines()
@@ -352,6 +358,24 @@ final class PostsStore: ObservableObject {
             try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: [
                 "publishAt": Int(new.timeIntervalSince1970),
                 "date": PostingSchedule.dayKey(new),
+            ])
+        } catch {
+            await refresh()
+            throw error
+        }
+        await refresh()
+    }
+
+    /// Moves a post to an exact date and time (used when it takes another post's slot).
+    func moveTo(_ post: Post, at time: Date) async throws {
+        if let i = posts.firstIndex(where: { $0.id == post.id }) {
+            posts[i].publishAt = time
+            posts[i].date = PostingSchedule.dayKey(time)
+        }
+        do {
+            try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: [
+                "publishAt": Int(time.timeIntervalSince1970),
+                "date": PostingSchedule.dayKey(time),
             ])
         } catch {
             await refresh()

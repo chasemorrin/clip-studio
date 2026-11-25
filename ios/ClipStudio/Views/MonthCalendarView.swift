@@ -9,6 +9,14 @@ struct MonthCalendarView: View {
     @State private var selectedDay: Date? = Calendar.current.startOfDay(for: Date())
     @State private var dropTarget: Date?
     @State private var moveError: String?
+    @State private var pendingDrop: PendingDrop?
+
+    /// A post dropped on a day that already has one, waiting for "push back" or "keep both".
+    struct PendingDrop: Identifiable {
+        let id = UUID()
+        let post: Post
+        let day: Date
+    }
     @State private var pagePost: String?
 
     private let cal = Calendar.current
@@ -32,6 +40,24 @@ struct MonthCalendarView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(moveError ?? "")
+        }
+        .confirmationDialog(pendingDrop.map { "\($0.day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) already has a post" } ?? "",
+                            isPresented: Binding(get: { pendingDrop != nil }, set: { if !$0 { pendingDrop = nil } }),
+                            titleVisibility: .visible, presenting: pendingDrop) { p in
+            Button("Push the other posts back") {
+                Task {
+                    do {
+                        try await posts.move(p.post, toDay: p.day)
+                        try await posts.pushBack(from: p.day, excluding: p.post.id)
+                    } catch { moveError = error.localizedDescription }
+                }
+            }
+            Button("Keep both on this day") {
+                Task { do { try await posts.move(p.post, toDay: p.day) } catch { moveError = error.localizedDescription } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Pushing back moves that day's post, and any after it that are in the way, to your next open posting slots.")
         }
     }
 
@@ -258,6 +284,10 @@ struct MonthCalendarView: View {
             return false
         }
         selectedDay = day
+        if !posts.conflicts(on: day, excluding: post.id).isEmpty {
+            pendingDrop = PendingDrop(post: post, day: day)
+            return true
+        }
         Task {
             do { try await posts.move(post, toDay: day) } catch { moveError = error.localizedDescription }
         }

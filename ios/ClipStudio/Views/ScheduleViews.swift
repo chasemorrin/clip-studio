@@ -69,7 +69,7 @@ struct ScheduleSheet: View {
                 await posts.refresh()
                 nextSlot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first
                 if let nextSlot { when = nextSlot }
-                autoPost = instagramConnected
+                autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
                 if youtubeTitle.isEmpty { youtubeTitle = clip.title }
             }
@@ -440,7 +440,7 @@ struct BatchScheduleSheet: View {
                 await posts.refresh()
                 let slots = PostingSchedule.nextSlots(pending.count, taken: posts.takenDays)
                 for (c, slot) in zip(pending, slots) { times[c.id] = slot }
-                autoPost = instagramConnected
+                autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
             }
         }

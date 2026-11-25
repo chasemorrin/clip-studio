@@ -272,7 +272,7 @@ struct PhotoPostView: View {
             await posts.refresh()
             earliest = Date()
             if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
-            autoPost = instagramConnected
+            autoPost = session.instagramByDefault
         }
     }
 

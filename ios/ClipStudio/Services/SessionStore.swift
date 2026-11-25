@@ -29,6 +29,8 @@ final class SessionStore: ObservableObject {
 
     func signOut() {
         Keychain.delete("session")
+        WidgetSync.saveLogin(server: Config.serverURL, token: nil)
+        UpcomingPosts.save([])
         isSignedIn = false
         instagramUsername = nil
         youtubeChannel = nil
@@ -49,6 +51,11 @@ final class SessionStore: ObservableObject {
     }
 
     /// Whether new clips should go to YouTube too (Settings), when a channel is connected.
+    /// Whether new posts go to Instagram automatically (Settings), when Instagram is connected.
+    var instagramByDefault: Bool {
+        instagramUsername != nil && (UserDefaults.standard.object(forKey: "instagramByDefault") as? Bool ?? true)
+    }
+
     var youtubeByDefault: Bool {
         youtubeChannel != nil && (UserDefaults.standard.object(forKey: "youtubeByDefault") as? Bool ?? true)
     }

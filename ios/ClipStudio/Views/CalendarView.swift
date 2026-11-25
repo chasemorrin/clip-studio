@@ -9,6 +9,14 @@ struct CalendarView: View {
     @State private var editing: Post?
     @State private var swapTarget: String?
     @State private var swapError: String?
+    @State private var pendingSwap: PendingSwap?
+
+    /// One post dropped on another, waiting for "swap" or "push back".
+    struct PendingSwap: Identifiable {
+        let id = UUID()
+        let dragged: Post
+        let target: Post
+    }
 
     private struct DayGroup: Identifiable {
         let day: Date
@@ -95,10 +103,29 @@ struct CalendarView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await posts.refresh() }
-        .alert("Can't swap these posts", isPresented: Binding(get: { swapError != nil }, set: { if !$0 { swapError = nil } })) {
+        .alert("Can't move these posts", isPresented: Binding(get: { swapError != nil }, set: { if !$0 { swapError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(swapError ?? "")
+        }
+        .confirmationDialog(pendingSwap.map { "Move \"\($0.dragged.title.isEmpty ? "Untitled" : $0.dragged.title)\"" } ?? "",
+                            isPresented: Binding(get: { pendingSwap != nil }, set: { if !$0 { pendingSwap = nil } }),
+                            titleVisibility: .visible, presenting: pendingSwap) { p in
+            Button("Swap the two posts") {
+                Task { do { try await posts.swapTimes(p.dragged, p.target) } catch { swapError = error.localizedDescription } }
+            }
+            Button("Take its place and push the others back") {
+                Task {
+                    guard let slot = p.target.publishAt else { return }
+                    do {
+                        try await posts.moveTo(p.dragged, at: slot)
+                        try await posts.pushBack(from: slot, excluding: p.dragged.id)
+                    } catch { swapError = error.localizedDescription }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { p in
+            Text("Swap trades their dates and times. Pushing back puts it at \(p.target.publishAt?.formatted(whenFormatShort) ?? "that time") and moves \"\(p.target.title.isEmpty ? "Untitled" : p.target.title)\", and any posts after it that are in the way, to your next open posting slots.")
         }
     }
 
@@ -185,9 +212,7 @@ struct CalendarView: View {
             swapError = "One of these posts' times has already passed. Open it and pick a new time instead."
             return false
         }
-        Task {
-            do { try await posts.swapTimes(dragged, target) } catch { swapError = error.localizedDescription }
-        }
+        pendingSwap = PendingSwap(dragged: dragged, target: target)
         return true
     }
 }
@@ -234,6 +259,9 @@ struct PostRow: View {
     }
 }
 
+/// Short date and time for dialogs, e.g. "Wed, Nov 26, 11:30 AM".
+let whenFormatShort = Date.FormatStyle().weekday(.abbreviated).month(.abbreviated).day().hour().minute()
+
 struct StatusPill: View {
     let state: Post.State
 
@@ -247,12 +275,15 @@ struct StatusPill: View {
             case .notAutoPosting: return ("Reminder only", .gray)
             }
         }()
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .foregroundStyle(color)
-            .background(color.opacity(0.14), in: Capsule())
+        HStack(spacing: 3) {
+            Image(systemName: "camera.fill").font(.caption2)
+            Text(text)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .foregroundStyle(color)
+        .background(color.opacity(0.14), in: Capsule())
     }
 }
 

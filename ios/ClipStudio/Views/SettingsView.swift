@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var youtubeError: String?
     @State private var confirmYouTubeDisconnect = false
     @AppStorage("youtubeByDefault") private var youtubeByDefault = true
+    @AppStorage("instagramByDefault") private var instagramByDefault = true
     @State private var storage: StorageUsage.Report?
     @State private var clearing = false
 
@@ -59,6 +60,7 @@ struct SettingsView: View {
                 Section {
                     if let name = session.instagramUsername {
                         LabeledContent("Connected", value: "@\(name)")
+                        Toggle("Automatically post clips to Instagram", isOn: $instagramByDefault)
                         Button("Disconnect Instagram", role: .destructive) { confirmDisconnect = true }
                     } else {
                         Button {
@@ -79,14 +81,15 @@ struct SettingsView: View {
                         if let instagramError {
                             Text(instagramError).foregroundStyle(.red)
                         }
-                        Text("Needed for automatic posting. Your account must be a Creator or Business account.")
+                        Text("Needed for automatic posting. Your account must be a Creator or Business account. The switches set where new posts go; you can still change it on each post.")
                     }
                 }
 
                 Section {
                     if let channel = session.youtubeChannel {
                         LabeledContent("Connected", value: session.youtubeHandle ?? channel)
-                        Toggle("Post new clips to YouTube too", isOn: $youtubeByDefault)
+                        Toggle("Automatically post clips to YouTube", isOn: $youtubeByDefault)
+                            .tint(.red)
                         Button("Disconnect YouTube", role: .destructive) { confirmYouTubeDisconnect = true }
                     } else {
                         Button {

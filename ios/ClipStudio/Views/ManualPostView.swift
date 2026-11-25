@@ -166,7 +166,7 @@ struct ManualPostView: View {
         .task {
             await posts.refresh()
             if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
-            autoPost = instagramConnected
+            autoPost = session.instagramByDefault
             youtube = session.youtubeByDefault
         }
     }
