@@ -145,7 +145,7 @@ async function accessToken(env: Env, acct: YtAccount): Promise<string> {
 /* ---------- uploading ---------- */
 
 interface Row {
-  id: string; user_id: string; title: string; yt_title: string | null; caption: string; media: string; yt_attempts: number;
+  id: string; user_id: string; title: string; yt_title: string | null; caption: string; yt_description: string | null; media: string; yt_attempts: number;
 }
 
 // YouTube doesn't allow < or > in titles and descriptions.
@@ -163,7 +163,7 @@ async function upload(env: Env, acct: YtAccount, row: Row): Promise<{ id: string
   const meta = {
     snippet: {
       title: clean(row.yt_title || row.title || "Untitled", 100) || "Untitled",
-      description: clean(row.caption || "", 5000),
+      description: clean(row.yt_description ?? row.caption ?? "", 5000),
       categoryId: "10", // Music
     },
     status: { privacyStatus: "public", selfDeclaredMadeForKids: false },
@@ -205,7 +205,7 @@ export async function runYouTube(env: Env): Promise<number> {
   ).bind("The YouTube upload was interrupted. Check your channel before retrying, in case it went through.", now, now - STUCK_AFTER).run();
 
   const { results } = await env.DB.prepare(
-    `SELECT id, user_id, title, yt_title, caption, media, yt_attempts FROM items
+    `SELECT id, user_id, title, yt_title, caption, yt_description, media, yt_attempts FROM items
      WHERE yt_state = 'queued' AND COALESCE(yt_due_at, publish_at) <= ? ORDER BY publish_at LIMIT 5`
   ).bind(now).all<Row>();
   let done = 0;

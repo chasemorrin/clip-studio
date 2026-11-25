@@ -299,6 +299,7 @@ struct PostEditSheet: View {
     @State private var autoPost = false
     @State private var youtube = false
     @State private var youtubeTitle = ""
+    @State private var youtubeTags = ""
     @State private var pushBack = false
     @State private var saving = false
     @State private var error: String?
@@ -308,6 +309,11 @@ struct PostEditSheet: View {
 
     /// The latest copy from the server (it changes after re-editing the clip).
     private var current: Post { posts.posts.first { $0.id == post.id } ?? post }
+
+    /// The Short's description: the Instagram caption's text with YouTube's hashtags.
+    var youtubeDescription: String {
+        DefaultHashtags.caption(DefaultHashtags.split(caption).body, tags: youtubeTags)
+    }
 
     /// True when the date picker is on a different day than the post's saved day.
     private var movedDay: Bool {
@@ -341,7 +347,8 @@ struct PostEditSheet: View {
                                      postNow: { Task { await postNow(.instagram) } }, caption: $caption)
                 if current.hasVideo || current.youtube.isOn {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube, busy: saving,
-                                          postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil)
+                                          postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil,
+                                          hashtags: $youtubeTags)
                 }
                 if !current.media.isEmpty {
                     Section {
@@ -372,7 +379,8 @@ struct PostEditSheet: View {
                                 let push = pushBack && movedDay
                                 try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
                                                        youtube: session.youtubeChannel != nil ? youtube : nil,
-                                                       youtubeTitle: youtube ? youtubeTitle : nil)
+                                                       youtubeTitle: youtube ? youtubeTitle : nil,
+                                                       youtubeDescription: youtubeDescription)
                                 await posts.pushBackAfterScheduling(push, day: when, newID: post.id)
                                 dismiss()
                             } catch {
@@ -390,6 +398,7 @@ struct PostEditSheet: View {
                 autoPost = post.state == .scheduled || post.state == .failed
                 youtube = post.youtube.isOn
                 youtubeTitle = post.youtube.title ?? post.title
+                youtubeTags = DefaultHashtags.format(DefaultHashtags.split(post.youtube.description ?? post.caption).tags)
             }
             .onChange(of: current.media.map(\.key)) { _, _ in savedToPhotos = false }
             // After re-editing the clip, pick up its new title and caption.
@@ -406,7 +415,8 @@ extension PostEditSheet {
         defer { saving = false }
         do {
             try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
-                                   youtube: session.youtubeChannel != nil ? youtube : nil, youtubeTitle: youtubeTitle)
+                                   youtube: session.youtubeChannel != nil ? youtube : nil, youtubeTitle: youtubeTitle,
+                                   youtubeDescription: youtubeDescription)
             try await posts.postNow(id: post.id, instagram: target == .instagram, youtube: target == .youtube)
             dismiss()
         } catch {
@@ -465,6 +475,8 @@ struct PostMediaPreview: View {
     @Binding var files: [URL]
     @EnvironmentObject var posts: PostsStore
     @State private var player: AVPlayer?
+    @State private var playing = false
+    @State private var loopObserver: NSObjectProtocol?
     @State private var loading = false
     @State private var failure: String?
 
@@ -481,11 +493,36 @@ struct PostMediaPreview: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 200)
             } else if post.media.first?.isVideo == true, let player {
-                VideoPlayer(player: player)
+                // A plain video layer with our own controls. Apple's full player inside this scrolling
+                // form can lock the app up when you scroll while it plays.
+                PlayerLayerView(player: player)
                     .aspectRatio(9 / 16, contentMode: .fit)
                     .frame(maxHeight: 420)
                     .frame(maxWidth: .infinity)
                     .background(Color.black)
+                    .contentShape(Rectangle())
+                    .onTapGesture { togglePlay() }
+                    .overlay {
+                        if !playing {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 30, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 72, height: 72)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if playing {
+                            Image(systemName: "pause.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .padding(10)
+                                .allowsHitTesting(false)
+                        }
+                    }
             } else {
                 TabView {
                     ForEach(files, id: \.self) { file in
@@ -502,7 +539,16 @@ struct PostMediaPreview: View {
             }
         }
         .task(id: post.media.map(\.key).joined(separator: ",")) { await load() }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            player?.pause()
+            playing = false
+        }
+    }
+
+    private func togglePlay() {
+        guard let player else { return }
+        if playing { player.pause() } else { player.play() }
+        playing.toggle()
     }
 
     private func load() async {
@@ -519,7 +565,14 @@ struct PostMediaPreview: View {
         }
         files = got
         if post.media.first?.isVideo == true, let first = got.first {
-            player = AVPlayer(url: first)
+            let p = AVPlayer(url: first)
+            // Loop, like Instagram.
+            loopObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
+                                                                  object: p.currentItem, queue: .main) { _ in
+                p.seek(to: .zero)
+                p.play()
+            }
+            player = p
         }
     }
 

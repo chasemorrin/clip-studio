@@ -241,6 +241,21 @@ enum DefaultHashtags {
     /// ["jazz", "piano"] → "#jazz #piano"
     static func format(_ tags: [String]) -> String { tags.map { "#" + $0 }.joined(separator: " ") }
 
+    /// Splits a full caption into its text and the hashtag-only lines at the end.
+    static func split(_ full: String) -> (body: String, tags: [String]) {
+        var lines = full.components(separatedBy: "\n")
+        var tags: [String] = []
+        while let last = lines.last {
+            let t = last.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { lines.removeLast(); continue }
+            let words = t.split(separator: " ")
+            guard words.allSatisfy({ $0.hasPrefix("#") }) else { break }
+            tags = parse(t) + tags
+            lines.removeLast()
+        }
+        return (lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), tags)
+    }
+
     /// Caption with hashtags on their own lines at the end, as Instagram will show it.
     static func caption(_ caption: String, tags: String) -> String {
         let t = format(parse(tags))

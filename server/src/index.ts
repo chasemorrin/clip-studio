@@ -141,6 +141,7 @@ interface ItemRow {
   caption: string; media: string; cover_ms: number | null; publish_at: number | null; post_state: string | null;
   ig_media_id: string | null; ig_permalink: string | null; post_error: string | null; created_at: number; updated_at: number;
   yt_state: string | null; yt_title: string | null; yt_video_id: string | null; yt_privacy: string | null; yt_error: string | null;
+  yt_description: string | null;
 }
 
 const toJson = (r: ItemRow) => ({
@@ -149,7 +150,7 @@ const toJson = (r: ItemRow) => ({
   publishAt: r.publish_at, postState: r.post_state, instagramMediaId: r.ig_media_id, permalink: r.ig_permalink,
   postError: r.post_error, createdAt: r.created_at, updatedAt: r.updated_at,
   youtube: {
-    state: r.yt_state, title: r.yt_title, videoId: r.yt_video_id, privacy: r.yt_privacy, error: r.yt_error,
+    state: r.yt_state, title: r.yt_title, description: r.yt_description, videoId: r.yt_video_id, privacy: r.yt_privacy, error: r.yt_error,
     url: r.yt_video_id ? `https://youtube.com/shorts/${r.yt_video_id}` : null,
   },
 });
@@ -180,6 +181,7 @@ async function applyFields(env: Env, uid: string, body: any, current: ItemRow | 
     if (f.publish_at !== current?.publish_at) { f.ig_due_at = null; f.yt_due_at = null; }
   }
   if ("ytTitle" in body) f.yt_title = typeof body.ytTitle === "string" ? body.ytTitle.slice(0, 100) : null;
+  if ("ytDescription" in body) f.yt_description = typeof body.ytDescription === "string" ? body.ytDescription.slice(0, 5000) : null;
 
   // YouTube: the app sends youtube true/false.
   if ("youtube" in body) {

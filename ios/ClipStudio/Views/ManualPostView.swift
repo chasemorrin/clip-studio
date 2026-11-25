@@ -50,6 +50,7 @@ struct ManualPostView: View {
     @State private var title = IdeaLink.title ?? ""
     @State private var caption = IdeaLink.caption ?? ""
     @State private var hashtags = DefaultHashtags.format(DefaultHashtags.list)
+    @State private var youtubeTags = DefaultHashtags.format(DefaultHashtags.list)
     @State private var when = Date().addingTimeInterval(3600)
     @State private var autoPost = true
     @State private var youtube = false
@@ -128,6 +129,10 @@ struct ManualPostView: View {
                 }
                 Section {
                     HashtagField(text: $hashtags)
+                        .onChange(of: hashtags) { old, new in
+                            // YouTube's hashtags follow Instagram's until they're changed separately.
+                            if DefaultHashtags.parse(youtubeTags) == DefaultHashtags.parse(old) { youtubeTags = new }
+                        }
                 } footer: {
                     Text("Added at the end of the caption.")
                 }
@@ -137,7 +142,7 @@ struct ManualPostView: View {
                                      postNow: { Task { await run(now: .instagram) } })
                 if format == "reel" {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                          postNow: { Task { await run(now: .youtube) } })
+                                          postNow: { Task { await run(now: .youtube) } }, hashtags: $youtubeTags)
                 }
                 Section {
                     Button {
@@ -201,7 +206,8 @@ struct ManualPostView: View {
             let name = title.isEmpty ? "Untitled post" : title
             let id = try await posts.create(title: name, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
                                             media: media, at: when, autoPost: instagramConnected && autoPost,
-                                            youtube: toYouTube, youtubeTitle: youtubeTitle.isEmpty ? name : youtubeTitle)
+                                            youtube: toYouTube, youtubeTitle: youtubeTitle.isEmpty ? name : youtubeTitle,
+                                            youtubeDescription: DefaultHashtags.caption(caption, tags: youtubeTags))
             switch now {
             case .instagram: try await posts.postNow(id: id, instagram: true, youtube: false)
             case .youtube: try await posts.postNow(id: id, instagram: false, youtube: true)

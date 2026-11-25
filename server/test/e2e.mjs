@@ -309,6 +309,14 @@ try {
     const again = await api("PATCH", `/v1/items/${it.id}`, { youtube: false });
     assert.equal(again.json.item.youtube.state, "posted", "can't un-post");
   });
+  await check("the Short can have its own description (different hashtags)", async () => {
+    const { key } = await clipOf(5000);
+    const r = await api("POST", "/v1/items", { title: "Tags", caption: "Live set\n\n#jazz #piano", ytDescription: "Live set\n\n#shorts #jazzpiano",
+      format: "reel", media: [{ key, type: "video" }], publishAt: 1, youtube: true });
+    assert.equal(r.json.item.youtube.description, "Live set\n\n#shorts #jazzpiano");
+    await tick();
+    assert.equal(state.ytUploads.at(-1).meta.snippet.description, "Live set\n\n#shorts #jazzpiano");
+  });
   await check("future YouTube posts wait; switching YouTube off cancels", async () => {
     const { key } = await clipOf(5000);
     const r = await api("POST", "/v1/items", { title: "Later", format: "reel", media: [{ key, type: "video" }], publishAt: Math.floor(Date.now() / 1000) + 3600, youtube: true });

@@ -48,6 +48,7 @@ struct Post: Identifiable, Hashable {
             default: state = .off
             }
             title = d["title"] as? String
+            description = d["description"] as? String
             privacy = d["privacy"] as? String
             error = d["error"] as? String
             url = (d["url"] as? String).flatMap(URL.init(string:))
@@ -56,6 +57,8 @@ struct Post: Identifiable, Hashable {
         var isOn: Bool { state != .off }
         /// Still has work to do (or failed and could be retried).
         var isPending: Bool { state == .scheduled || state == .uploading || state == .failed }
+        /// The Short's description, if it differs from the Instagram caption.
+        var description: String?
     }
 
     init?(_ d: [String: Any]) {
@@ -237,6 +240,7 @@ final class PostsStore: ObservableObject {
         let media = try await APIClient.shared.upload(file: file)
         return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why, format: "reel",
                                 media: [media], at: date, autoPost: autoPost, youtube: youtube, youtubeTitle: youtubeTitle,
+                                youtubeDescription: clip.youtubeDescription,
                                 plan: sourceAssetID.flatMap { ClipPlan(clip: clip, assetId: $0).json })
     }
 
@@ -269,7 +273,7 @@ final class PostsStore: ObservableObject {
     @discardableResult
     func create(title: String, caption: String, notes: String = "", format: String,
                 media: [(key: String, type: String)], at date: Date, autoPost: Bool, youtube: Bool = false, youtubeTitle: String? = nil,
-                plan: [String: Any]? = nil) async throws -> String {
+                youtubeDescription: String? = nil, plan: [String: Any]? = nil) async throws -> String {
         var body: [String: Any] = [
             "title": title,
             "pillar": "live",
@@ -284,6 +288,7 @@ final class PostsStore: ObservableObject {
         if autoPost { body["autoPost"] = true }
         if youtube { body["youtube"] = true }
         if let youtubeTitle, !youtubeTitle.isEmpty { body["ytTitle"] = String(youtubeTitle.prefix(100)) }
+        if let youtubeDescription, youtubeDescription != caption { body["ytDescription"] = youtubeDescription }
         if let plan { body["plan"] = plan }
         // Made from an idea (Ideas → Add media): the idea becomes this post, keeping its title and breakdown.
         if let idea = IdeaLink.shared.idea {
@@ -324,7 +329,7 @@ final class PostsStore: ObservableObject {
     }
 
     func update(_ post: Post, title: String, publishAt: Date, caption: String, autoPost: Bool,
-                youtube: Bool? = nil, youtubeTitle: String? = nil) async throws {
+                youtube: Bool? = nil, youtubeTitle: String? = nil, youtubeDescription: String? = nil) async throws {
         var body: [String: Any] = [
             "title": title,
             "publishAt": Int(publishAt.timeIntervalSince1970),
@@ -337,6 +342,8 @@ final class PostsStore: ObservableObject {
             body["youtube"] = youtube
         }
         if let youtubeTitle { body["ytTitle"] = String(youtubeTitle.prefix(100)) }
+        // Same as the caption → nil, so YouTube follows later caption edits.
+        if let youtubeDescription { body["ytDescription"] = youtubeDescription == caption ? (NSNull() as Any) : (youtubeDescription as Any) }
         try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
         await refresh()
     }
@@ -496,6 +503,11 @@ final class PostsStore: ObservableObject {
 }
 
 extension ClipSuggestion {
+    /// The Short's description: the caption with YouTube's hashtags (Instagram's unless changed).
+    var youtubeDescription: String {
+        DefaultHashtags.caption(caption, tags: DefaultHashtags.format(youtubeHashtags ?? hashtags))
+    }
+
     /// Caption plus hashtags, as it will appear on Instagram.
     var fullCaption: String {
         let tags = hashtags.map { "#" + $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }.joined(separator: " ")

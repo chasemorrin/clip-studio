@@ -1,9 +1,16 @@
+import AVFoundation
 import SwiftUI
 
 @main
 struct ClipStudioApp: App {
     @StateObject private var session = SessionStore()
     @StateObject private var posts = PostsStore()
+
+    init() {
+        // Play video sound even with the ringer switch on silent (like other video apps).
+        // Other audio, like music, pauses only when a video actually plays.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+    }
 
     var body: some Scene {
         WindowGroup {

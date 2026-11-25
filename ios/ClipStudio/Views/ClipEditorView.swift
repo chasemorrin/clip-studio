@@ -91,6 +91,7 @@ struct ClipEditorView: View {
 
     @State private var showSchedule = false
     @State private var hashtagText = ""
+    @State private var youtubeTagText = ""
 
     /// The finished file, kept on the clip so scheduling can reuse it.
     private var output: URL? {
@@ -203,7 +204,19 @@ struct ClipEditorView: View {
                               axis: .vertical)
                         .lineLimit(1...3)
                         .textFieldStyle(.roundedBorder)
-                    Text("Up to 100 characters. Leave empty to use the title above. The Short's description is the caption.")
+                    Text("Up to 100 characters. Leave empty to use the title above.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HashtagField(text: $youtubeTagText, label: "YouTube hashtags")
+                        .onAppear { youtubeTagText = DefaultHashtags.format(clip.youtubeHashtags ?? clip.hashtags) }
+                        .onChange(of: youtubeTagText) { _, t in
+                            let tags = DefaultHashtags.parse(t)
+                            clip.youtubeHashtags = tags == clip.hashtags ? nil : tags
+                        }
+                        .onChange(of: clip.hashtags) { _, tags in
+                            // Follow Instagram's hashtags until they're changed here.
+                            if clip.youtubeHashtags == nil { youtubeTagText = DefaultHashtags.format(tags) }
+                        }
+                    Text("Copied from Instagram's hashtags. Change them here to use different ones on YouTube. The Short's description is the caption with these.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -294,7 +307,7 @@ struct ClipEditorView: View {
                 looper.pause()
                 showSchedule = true
             } label: {
-                Label(clip.scheduledFor == nil ? "Schedule for Instagram…" : "Schedule again…", systemImage: "calendar.badge.plus")
+                Label(clip.scheduledFor == nil ? "Schedule your post…" : "Schedule again…", systemImage: "calendar.badge.plus")
                     .frame(maxWidth: .infinity).padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)

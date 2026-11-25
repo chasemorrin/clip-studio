@@ -18,6 +18,7 @@ struct ScheduleSheet: View {
     @State private var autoPost = true
     @State private var youtube = false
     @State private var youtubeTitle = ""
+    @State private var youtubeTags = ""
     @State private var pushBack = false
     @State private var working: String?
     @State private var progress: Double?
@@ -37,7 +38,7 @@ struct ScheduleSheet: View {
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                      postNow: { Task { await schedule(now: .youtube) } })
+                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags)
                 if let working {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -66,6 +67,7 @@ struct ScheduleSheet: View {
                 autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
                 if youtubeTitle.isEmpty { youtubeTitle = clip.youtubeTitle ?? clip.title }
+                if youtubeTags.isEmpty { youtubeTags = DefaultHashtags.format(clip.youtubeHashtags ?? clip.hashtags) }
             }
         }
     }
@@ -86,6 +88,8 @@ struct ScheduleSheet: View {
             }
             working = "Uploading…"
             progress = nil
+            let ytTags = DefaultHashtags.parse(youtubeTags)
+            clip.youtubeHashtags = ytTags == clip.hashtags ? nil : ytTags
             let id = try await posts.schedule(file: file, clip: clip, at: when, autoPost: instagramConnected && autoPost,
                                               youtube: toYouTube, youtubeTitle: youtubeTitle, sourceAssetID: analysis.sourceAssetID)
             clip.youtubeTitle = youtubeTitle == clip.title ? nil : youtubeTitle
@@ -218,6 +222,8 @@ struct YouTubeOptionsSection: View {
     var status: Post.YouTubeStatus? = nil
     var busy = false
     var postNow: (() -> Void)? = nil
+    /// The Short's hashtags (copied from Instagram; can be changed here).
+    var hashtags: Binding<String>? = nil
     @EnvironmentObject var session: SessionStore
 
     private var connected: Bool { session.youtubeChannel != nil }
@@ -239,6 +245,10 @@ struct YouTubeOptionsSection: View {
                     .lineLimit(1...3)
                     .disabled(posted)
                     .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
+                if let hashtags {
+                    HashtagField(text: hashtags, label: "YouTube hashtags")
+                        .disabled(posted)
+                }
             }
             if let status, status.isOn {
                 YouTubeStatusView(status: status)
@@ -256,7 +266,7 @@ struct YouTubeOptionsSection: View {
             if !connected {
                 Text("Connect YouTube in Settings to post Shorts too.")
             } else if !posted {
-                Text(isOn ? "Same time and caption as Instagram. Title up to 100 characters (\(title.count) now)."
+                Text(isOn ? "Same time and caption as Instagram, with these hashtags. Title up to 100 characters (\(title.count) now)."
                           : "Post now works even when this is off.")
             }
         }
