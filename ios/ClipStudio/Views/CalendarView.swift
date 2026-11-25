@@ -348,7 +348,7 @@ struct PostEditSheet: View {
                 if current.hasVideo || current.youtube.isOn {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube, busy: saving,
                                           postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil,
-                                          hashtags: $youtubeTags)
+                                          hashtags: $youtubeTags, instagramCaption: caption)
                 }
                 if !current.media.isEmpty {
                     Section {

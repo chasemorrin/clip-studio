@@ -38,7 +38,8 @@ struct ScheduleSheet: View {
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags)
+                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags,
+                                      instagramCaption: clip.caption)
                 if let working {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -224,6 +225,8 @@ struct YouTubeOptionsSection: View {
     var postNow: (() -> Void)? = nil
     /// The Short's hashtags (copied from Instagram; can be changed here).
     var hashtags: Binding<String>? = nil
+    /// The Instagram caption, for "Copy Instagram caption" into the title.
+    var instagramCaption: String? = nil
     @EnvironmentObject var session: SessionStore
 
     private var connected: Bool { session.youtubeChannel != nil }
@@ -241,6 +244,18 @@ struct YouTubeOptionsSection: View {
             .tint(.red)
             .disabled(!connected || posted)
             if isOn || posted {
+                if let instagramCaption, !posted,
+                   !instagramCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack {
+                        Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Copy Instagram caption") {
+                            title = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption)
+                        }
+                        .font(.footnote)
+                        .buttonStyle(.borderless)
+                    }
+                }
                 TextField("YouTube title", text: $title, axis: .vertical)
                     .lineLimit(1...3)
                     .disabled(posted)

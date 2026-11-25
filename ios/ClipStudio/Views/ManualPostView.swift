@@ -142,7 +142,8 @@ struct ManualPostView: View {
                                      postNow: { Task { await run(now: .instagram) } })
                 if format == "reel" {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                          postNow: { Task { await run(now: .youtube) } }, hashtags: $youtubeTags)
+                                          postNow: { Task { await run(now: .youtube) } }, hashtags: $youtubeTags,
+                                          instagramCaption: caption)
                 }
                 Section {
                     Button {

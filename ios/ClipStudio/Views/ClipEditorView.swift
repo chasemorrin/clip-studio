@@ -197,6 +197,13 @@ struct ClipEditorView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "play.rectangle.fill").foregroundStyle(.red)
                         Text("YouTube title").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Copy Instagram caption") {
+                            let t = DefaultHashtags.youtubeTitle(fromCaption: clip.caption)
+                            clip.youtubeTitle = t.isEmpty ? nil : t
+                        }
+                        .font(.footnote)
+                        .disabled(clip.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     TextField(clip.title.isEmpty ? "Title for the Short" : clip.title,
                               text: Binding(get: { clip.youtubeTitle ?? "" },

@@ -241,6 +241,19 @@ enum DefaultHashtags {
     /// ["jazz", "piano"] → "#jazz #piano"
     static func format(_ tags: [String]) -> String { tags.map { "#" + $0 }.joined(separator: " ") }
 
+    /// A YouTube title from a caption: its text without the hashtags, on one line, at most 100 characters
+    /// (cut at the last whole word).
+    static func youtubeTitle(fromCaption caption: String) -> String {
+        let text = split(caption).body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+        guard text.count > 100 else { return text }
+        let cut = String(text.prefix(100))
+        if let space = cut.lastIndex(of: " "), cut.distance(from: cut.startIndex, to: space) > 60 {
+            return String(cut[..<space])
+        }
+        return cut
+    }
+
     /// Splits a full caption into its text and the hashtag-only lines at the end.
     static func split(_ full: String) -> (body: String, tags: [String]) {
         var lines = full.components(separatedBy: "\n")
