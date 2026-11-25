@@ -147,27 +147,64 @@ enum IdeaGenerator {
     // MARK: Claude (through the server)
 
     private static func withClaude(brief: String, avoid: [String]) async throws -> [IdeaDraft] {
-        let text = try await APIClient.shared.askClaude(
+        let ask = prompt(brief: brief, avoid: avoid) + """
+
+
+        Keep every field short: hook, idea and why one sentence each, what to film at most 3 short sentences.
+        Answer with only a JSON array of \(count) objects, no other text, with the keys: \
+        title, format ("reel", "carousel" or "photo"), hook, concept, whatToFilm, caption, whyItWorks.
+        """
+        let (text, stop) = try await APIClient.shared.askClaudeWithStop(
             system: instructions + " Answer with JSON only.",
-            content: [["type": "text", "text": prompt(brief: brief, avoid: avoid) + """
-
-
-            Answer with a JSON array of \(count) objects with the keys: title, format ("reel", "carousel" or "photo"), \
-            hook, concept, whatToFilm, caption, whyItWorks.
-            """]],
-            maxTokens: 3000)
-        guard let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"),
-              let data = String(text[start...end]).data(using: .utf8),
-              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            throw APIError(code: "bad_ideas", message: "Claude's answer couldn't be read. Try again.")
+            content: [["type": "text", "text": ask]],
+            maxTokens: 4000)
+        let ideas = jsonObjects(in: text).compactMap(draft)
+        if ideas.isEmpty {
+            throw APIError(code: "bad_ideas", message: stop == "max_tokens"
+                ? "Claude's answer was too long and got cut off. Try again."
+                : "Claude's answer couldn't be read. Try again.")
         }
-        return list.map { d in
-            let s = { (k: String) in (d[k] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-            let f = s("format").lowercased()
-            return IdeaDraft(title: s("title"), format: ["reel", "carousel", "photo"].contains(f) ? f : "reel",
-                             hook: s("hook"), concept: s("concept"), whatToFilm: s("whatToFilm"),
-                             caption: s("caption"), whyItWorks: s("whyItWorks"))
+        // If the answer was cut off, keep the ideas that came through whole.
+        return ideas
+    }
+
+    private static func draft(_ d: [String: Any]) -> IdeaDraft? {
+        let s = { (k: String) in (d[k] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard !s("title").isEmpty else { return nil }
+        let f = s("format").lowercased()
+        return IdeaDraft(title: s("title"), format: ["reel", "carousel", "photo"].contains(f) ? f : "reel",
+                         hook: s("hook"), concept: s("concept").isEmpty ? s("idea") : s("concept"),
+                         whatToFilm: s("whatToFilm"), caption: s("caption"), whyItWorks: s("whyItWorks"))
+    }
+
+    /// Every complete JSON object in the text, wherever it is: inside a code block, after a sentence,
+    /// wrapped in {"ideas": [...]}, or in an answer that was cut off partway.
+    static func jsonObjects(in text: String) -> [[String: Any]] {
+        var found: [[String: Any]] = []
+        var depth = 0, inString = false, escaped = false
+        var start: String.Index?
+        for i in text.indices {
+            let ch = text[i]
+            if inString {
+                if escaped { escaped = false } else if ch == "\\" { escaped = true } else if ch == "\"" { inString = false }
+                continue
+            }
+            switch ch {
+            case "\"" where depth > 0:
+                inString = true
+            case "{":
+                if depth == 0 { start = i }
+                depth += 1
+            case "}" where depth > 0:
+                depth -= 1
+                if depth == 0, let s = start,
+                   let obj = try? JSONSerialization.jsonObject(with: Data(text[s...i].utf8)) as? [String: Any] {
+                    if let list = obj["ideas"] as? [[String: Any]] { found += list } else { found.append(obj) }
+                }
+            default:
+                break
+            }
         }
-        .filter { !$0.title.isEmpty }
+        return found
     }
 }

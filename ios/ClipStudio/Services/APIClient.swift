@@ -94,12 +94,17 @@ final class APIClient {
 
     /// content: an array of Claude content blocks (text and image dictionaries).
     func askClaude(system: String, content: [[String: Any]], maxTokens: Int = 3000) async throws -> String {
+        try await askClaudeWithStop(system: system, content: content, maxTokens: maxTokens).text
+    }
+
+    /// Also says why Claude stopped ("max_tokens" means the answer was cut off).
+    func askClaudeWithStop(system: String, content: [[String: Any]], maxTokens: Int = 3000) async throws -> (text: String, stopReason: String?) {
         let r = try await request("POST", "v1/claude", json: [
             "system": system,
             "messages": [["role": "user", "content": content]],
             "maxTokens": maxTokens,
         ])
-        return r["text"] as? String ?? ""
+        return (r["text"] as? String ?? "", r["stopReason"] as? String)
     }
 }
 
