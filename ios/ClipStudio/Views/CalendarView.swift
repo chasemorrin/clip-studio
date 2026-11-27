@@ -57,33 +57,34 @@ struct CalendarView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                Picker("View", selection: $mode) {
-                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                VStack(spacing: 0) {
+                    PageHeader(title: "Calendar") {
+                        Menu {
+                            let day = addDay
+                            Section(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
+                                Button { IdeaLink.shared.startClip(on: day) } label: {
+                                    Label("Add a clip", systemImage: "film")
+                                }
+                                Button { newIdeaDay = NewIdeaDay(day: day) } label: {
+                                    Label("Add an idea", systemImage: "lightbulb")
+                                }
+                            }
+                        } label: {
+                            HeaderAddButton()
+                        }
+                        .accessibilityLabel("Add")
+                    }
+                    Picker("View", selection: $mode) {
+                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
                 .background(.bar)
             }
             .navigationTitle("Calendar")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        let day = addDay
-                        Section(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
-                            Button { IdeaLink.shared.startClip(on: day) } label: {
-                                Label("Add a clip", systemImage: "film")
-                            }
-                            Button { newIdeaDay = NewIdeaDay(day: day) } label: {
-                                Label("Add an idea", systemImage: "lightbulb")
-                            }
-                        }
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $newIdeaDay) { d in NewIdeaSheet(day: d.day) }
             .task {
                 // Keep statuses fresh while this screen is open: every few seconds while

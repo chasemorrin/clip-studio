@@ -177,7 +177,11 @@ struct SettingsView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PageHeader(title: "Settings").background(Color(.systemGroupedBackground), ignoresSafeAreaEdges: .top)
+            }
             .navigationTitle("Settings")
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showTokenSheet) { TokenConnectSheet() }
             .task { await session.refreshProfile() }
             .task { await measureStorage() }

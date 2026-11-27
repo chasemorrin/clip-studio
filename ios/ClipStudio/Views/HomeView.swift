@@ -75,9 +75,17 @@ struct HomeView: View {
         NavigationStack {
           ScrollView {
             VStack(spacing: 24) {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 56, weight: .light))
-                    .foregroundStyle(Theme.accent)
+                HStack(spacing: 14) {
+                    Text("Clip")
+                    Image(systemName: "film.stack")
+                        .font(.system(size: 56, weight: .light))
+                    Text("Studio")
+                }
+                .font(.largeTitle.bold())
+                .foregroundStyle(Theme.accent)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Clip Studio")
+                .accessibilityAddTraits(.isHeader)
                 if let idea = ideaLink.idea {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "lightbulb.fill").foregroundStyle(Theme.accent)
@@ -176,8 +184,8 @@ struct HomeView: View {
             .padding(.top, 28)
             .padding(.bottom, 40)
           }
-            .navigationTitle("Clip Studio")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Clips")
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $footage) { f in ProjectView(url: f.url, useClaude: f.useClaude, assetID: f.assetID) }
             .navigationDestination(item: $openSaved) { o in ProjectView(saved: o.project, url: o.url) }
             .confirmationDialog("Remove this video's clips?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),

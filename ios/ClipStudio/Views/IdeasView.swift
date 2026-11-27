@@ -44,12 +44,15 @@ struct IdeasView: View {
                     }
                 }
             }
-            .navigationTitle("Ideas")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { adding = true } label: { Label("Add your own idea", systemImage: "plus") }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PageHeader(title: "Ideas") {
+                    Button { adding = true } label: { HeaderAddButton() }
+                        .accessibilityLabel("Add your own idea")
                 }
+                .background(Color(.systemGroupedBackground), ignoresSafeAreaEdges: .top)
             }
+            .navigationTitle("Ideas")
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable { await posts.refresh() }
             .task { await posts.refresh() }
             .sheet(isPresented: $adding) { NewIdeaSheet() }
