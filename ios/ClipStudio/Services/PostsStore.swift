@@ -153,6 +153,13 @@ enum PostingSchedule {
         return slots
     }
 
+    /// Your usual posting time on `day`; an hour from now if that time has already passed today.
+    static func time(on day: Date) -> Date {
+        let cal = Calendar.current
+        let t = cal.date(byAdding: .minute, value: minutes, to: cal.startOfDay(for: day)) ?? day
+        return t > Date().addingTimeInterval(10 * 60) ? t : Date().addingTimeInterval(3600)
+    }
+
     static func dayKey(_ date: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -175,11 +182,14 @@ final class PostsStore: ObservableObject {
     }
 
     @discardableResult
-    func createIdea(title: String, notes: String, caption: String = "", format: String = "reel") async throws -> String {
-        let r = try await APIClient.shared.request("POST", "v1/items", json: [
+    func createIdea(title: String, notes: String, caption: String = "", format: String = "reel",
+                    publishAt: Date? = nil) async throws -> String {
+        var body: [String: Any] = [
             "title": String(title.prefix(300)), "notes": notes, "caption": caption,
             "format": format, "status": "idea", "pillar": "idea",
-        ])
+        ]
+        if let publishAt { body["publishAt"] = Int(publishAt.timeIntervalSince1970) }
+        let r = try await APIClient.shared.request("POST", "v1/items", json: body)
         await refresh()
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""
     }
@@ -308,10 +318,12 @@ final class PostsStore: ObservableObject {
             body["status"] = "planned"
             try await APIClient.shared.request("PATCH", "v1/items/\(idea.id)", json: body)
             IdeaLink.shared.finish()
+            IdeaLink.shared.plannedDay = nil
             await refresh()
             return idea.id
         }
         let r = try await APIClient.shared.request("POST", "v1/items", json: body)
+        IdeaLink.shared.plannedDay = nil
         await refresh()
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""
     }
@@ -609,6 +621,19 @@ final class IdeaLink: ObservableObject {
     @Published private(set) var idea: Post?
     /// Asks the app to switch to the Clips tab.
     @Published var openClips = false
+    /// Calendar → + → Add a clip: the day the new post should go on.
+    @Published var plannedDay: Date?
+
+    func startClip(on day: Date) {
+        plannedDay = day
+        openClips = true
+    }
+
+    /// The posting time on the planned day (your usual time, or an hour from now if that's passed).
+    var plannedTime: Date? {
+        guard let day = plannedDay else { return nil }
+        return PostingSchedule.time(on: day)
+    }
 
     /// The idea's brief and caption, for Claude's clip picks while making the post (read off the main thread).
     nonisolated(unsafe) static var brief: String?

@@ -67,6 +67,8 @@ struct ScheduleSheet: View {
                 if let nextSlot { when = nextSlot }
                 // Made from an idea planned on the calendar: keep its day.
                 if let planned = IdeaLink.shared.idea?.publishAt, planned > Date() { when = planned }
+                // Started from the Calendar's + on a day: use that day.
+                if let planned = IdeaLink.shared.plannedTime { when = planned }
                 autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
                 if youtubeTitle.isEmpty { youtubeTitle = clip.youtubeTitle ?? clip.title }

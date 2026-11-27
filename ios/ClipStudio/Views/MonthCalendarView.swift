@@ -4,9 +4,10 @@ import SwiftUI
 /// long-press a post in the grid and drag it to move it to another day.
 struct MonthCalendarView: View {
     @Binding var editing: Post?
+    /// Owned by the Calendar screen so its + button knows the day.
+    @Binding var selectedDay: Date?
     @EnvironmentObject var posts: PostsStore
     @State private var month = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
-    @State private var selectedDay: Date? = Calendar.current.startOfDay(for: Date())
     @State private var dropTarget: Date?
     @State private var moveError: String?
     @State private var pendingDrop: PendingDrop?

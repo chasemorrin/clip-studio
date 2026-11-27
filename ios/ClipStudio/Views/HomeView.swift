@@ -91,6 +91,19 @@ struct HomeView: View {
                     .padding(12)
                     .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
                 }
+                if let day = ideaLink.plannedDay {
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar").foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Making a post for").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(day.formatted(.dateTime.weekday(.wide).month(.wide).day())).font(.subheadline.weight(.semibold))
+                        }
+                        Spacer()
+                        Button("Cancel") { ideaLink.plannedDay = nil }.font(.subheadline)
+                    }
+                    .padding(12)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                }
                 VStack(spacing: 8) {
                     Text("Make a post")
                         .font(.title2.weight(.semibold))

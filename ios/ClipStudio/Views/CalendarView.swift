@@ -10,6 +10,21 @@ struct CalendarView: View {
     @State private var swapTarget: String?
     @State private var swapError: String?
     @State private var pendingSwap: PendingSwap?
+    @State private var selectedDay: Date? = Calendar.current.startOfDay(for: Date())
+    @State private var newIdeaDay: NewIdeaDay?
+
+    struct NewIdeaDay: Identifiable {
+        let id = UUID()
+        let day: Date
+    }
+
+    /// The day the + button adds to: the selected day in Month view (if it isn't past),
+    /// otherwise the next open posting day.
+    private var addDay: Date {
+        let today = Calendar.current.startOfDay(for: Date())
+        if mode == .month, let d = selectedDay, d >= today { return d }
+        return PostingSchedule.nextSlots(1, taken: posts.takenDays).first ?? today
+    }
 
     /// One post dropped on another, waiting for "swap" or "push back".
     struct PendingSwap: Identifiable {
@@ -38,7 +53,7 @@ struct CalendarView: View {
             Group {
                 switch mode {
                 case .list: listView
-                case .month: MonthCalendarView(editing: $editing)
+                case .month: MonthCalendarView(editing: $editing, selectedDay: $selectedDay)
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -52,6 +67,24 @@ struct CalendarView: View {
             }
             .navigationTitle("Calendar")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        let day = addDay
+                        Section(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
+                            Button { IdeaLink.shared.startClip(on: day) } label: {
+                                Label("Add a clip", systemImage: "film")
+                            }
+                            Button { newIdeaDay = NewIdeaDay(day: day) } label: {
+                                Label("Add an idea", systemImage: "lightbulb")
+                            }
+                        }
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                }
+            }
+            .sheet(item: $newIdeaDay) { d in NewIdeaSheet(day: d.day) }
             .task {
                 // Keep statuses fresh while this screen is open: every few seconds while
                 // something is posting (or about to), otherwise every 30 seconds.

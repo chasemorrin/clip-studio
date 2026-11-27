@@ -196,8 +196,12 @@ struct IdeaSections {
 
 /// Add your own idea.
 struct NewIdeaSheet: View {
+    /// Opened from the Calendar's +: starts on the calendar on this day.
+    var day: Date? = nil
     @EnvironmentObject var posts: PostsStore
     @Environment(\.dismiss) private var dismiss
+    @State private var onCalendar = false
+    @State private var when = Date().addingTimeInterval(3600)
     @State private var title = ""
     @State private var notes = ""
     @State private var format = "reel"
@@ -220,9 +224,25 @@ struct NewIdeaSheet: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                Section {
+                    Toggle(isOn: $onCalendar) {
+                        Label("Put on the calendar", systemImage: "calendar.badge.plus")
+                    }
+                    if onCalendar { PostDateField(date: $when) }
+                } footer: {
+                    if onCalendar { Text("Shows on your calendar in gray as Idea only.") }
+                }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }
             .navigationTitle("New idea")
+            .onAppear {
+                if let day {
+                    onCalendar = true
+                    when = PostingSchedule.time(on: day)
+                } else if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first {
+                    when = slot
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -232,7 +252,8 @@ struct NewIdeaSheet: View {
                             saving = true
                             defer { saving = false }
                             do {
-                                try await posts.createIdea(title: title, notes: notes, format: format)
+                                try await posts.createIdea(title: title, notes: notes, format: format,
+                                                           publishAt: onCalendar ? when : nil)
                                 dismiss()
                             } catch { self.error = error.localizedDescription }
                         }
