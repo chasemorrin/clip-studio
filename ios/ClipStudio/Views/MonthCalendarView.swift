@@ -299,6 +299,7 @@ struct MonthCalendarView: View {
 extension Post {
     /// The Instagram status color, or YouTube's for a YouTube-only post.
     var displayColor: Color {
+        if isIdea { return .gray }
         guard state == .notAutoPosting, youtube.isOn else { return state.color }
         switch youtube.state {
         case .failed: return .red

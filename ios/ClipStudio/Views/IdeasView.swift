@@ -139,6 +139,10 @@ struct IdeaRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 IdeaStatusPill(status: idea.status)
                 Text(idea.format.capitalized).font(.caption2).foregroundStyle(.secondary)
+                if let at = idea.publishAt {
+                    Label(at.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .contentShape(Rectangle())
@@ -254,9 +258,14 @@ struct IdeaDetailView: View {
     @State private var saving = false
     @State private var error: String?
     @State private var confirmDelete = false
+    @State private var onCalendar = false
+    @State private var when = Date().addingTimeInterval(3600)
+
+    private var plannedAt: Date? { onCalendar ? when : nil }
 
     private var changed: Bool {
         title != idea.title || notes != idea.notes || caption != idea.caption || format != idea.format || status != idea.status
+            || plannedAt != idea.publishAt
     }
 
     var body: some View {
@@ -273,6 +282,25 @@ struct IdeaDetailView: View {
                         Text("Photo").tag("photo")
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section {
+                    Toggle(isOn: $onCalendar) {
+                        Label("Put on the calendar", systemImage: "calendar.badge.plus")
+                    }
+                    .onChange(of: onCalendar) { _, on in
+                        if on, idea.publishAt == nil,
+                           let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
+                    }
+                    if onCalendar {
+                        PostDateField(date: $when, excluding: idea.id)
+                    }
+                } header: {
+                    Text("Schedule")
+                } footer: {
+                    Text(onCalendar
+                         ? "Shows on your calendar in gray as Idea only. Nothing posts until you add media and make the post."
+                         : "Plan when this goes out. It shows on your calendar as Idea only.")
                 }
 
                 Section {
@@ -348,6 +376,8 @@ struct IdeaDetailView: View {
                 caption = idea.caption
                 format = idea.format
                 status = idea.status
+                onCalendar = idea.publishAt != nil
+                if let at = idea.publishAt { when = at }
             }
         }
     }
@@ -358,7 +388,8 @@ struct IdeaDetailView: View {
         saving = true
         defer { saving = false }
         do {
-            try await posts.updateIdea(idea, title: title, notes: notes, caption: caption, format: format, status: status)
+            try await posts.updateIdea(idea, title: title, notes: notes, caption: caption, format: format, status: status,
+                                       publishAt: plannedAt)
             return true
         } catch {
             self.error = error.localizedDescription

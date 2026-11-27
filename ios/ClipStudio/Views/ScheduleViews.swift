@@ -34,7 +34,7 @@ struct ScheduleSheet: View {
                     LabeledContent(clip.title, value: String(format: "%.0f s", clip.length))
                 }
                 WhenSection(when: $when, nextSlot: nextSlot)
-                PushBackSection(day: when, isOn: $pushBack)
+                PushBackSection(day: when, excluding: IdeaLink.shared.idea?.id, isOn: $pushBack)
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
@@ -65,6 +65,8 @@ struct ScheduleSheet: View {
                 await posts.refresh()
                 nextSlot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first
                 if let nextSlot { when = nextSlot }
+                // Made from an idea planned on the calendar: keep its day.
+                if let planned = IdeaLink.shared.idea?.publishAt, planned > Date() { when = planned }
                 autoPost = session.instagramByDefault
                 youtube = session.youtubeByDefault
                 if youtubeTitle.isEmpty { youtubeTitle = clip.youtubeTitle ?? clip.title }

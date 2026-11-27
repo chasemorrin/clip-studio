@@ -60,7 +60,9 @@ struct CalendarView: View {
                     try? await Task.sleep(for: .seconds(posts.somethingIsHappening ? 4 : 30))
                 }
             }
-            .sheet(item: $editing) { post in PostEditSheet(post: post) }
+            .sheet(item: $editing) { post in
+                if post.isIdea { IdeaDetailView(idea: post) } else { PostEditSheet(post: post) }
+            }
         }
     }
 
@@ -252,9 +254,13 @@ struct PostRow: View {
                 Text(post.title.isEmpty ? "Untitled" : post.title).font(.headline).lineLimit(2)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    // A YouTube-only post isn't a reminder: don't show "Reminder only" for its Instagram side.
-                    if !(post.youtube.isOn && post.state == .notAutoPosting) { StatusPill(state: post.state) }
-                    if post.youtube.isOn { YouTubePill(status: post.youtube) }
+                    if post.isIdea {
+                        IdeaOnlyPill()
+                    } else {
+                        // A YouTube-only post isn't a reminder: don't show "Reminder only" for its Instagram side.
+                        if !(post.youtube.isOn && post.state == .notAutoPosting) { StatusPill(state: post.state) }
+                        if post.youtube.isOn { YouTubePill(status: post.youtube) }
+                    }
                 }
             }
             if let at = post.publishAt {
@@ -287,6 +293,21 @@ struct PostRow: View {
 
 /// Short date and time for dialogs, e.g. "Wed, Nov 26, 11:30 AM".
 let whenFormatShort = Date.FormatStyle().weekday(.abbreviated).month(.abbreviated).day().hour().minute()
+
+/// An idea planned on the calendar: nothing posts, it's a placeholder until you make the post.
+struct IdeaOnlyPill: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lightbulb.fill").font(.caption2)
+            Text("Idea only")
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .foregroundStyle(.gray)
+        .background(Color.gray.opacity(0.14), in: Capsule())
+    }
+}
 
 struct StatusPill: View {
     let state: Post.State

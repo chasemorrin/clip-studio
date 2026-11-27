@@ -139,7 +139,7 @@ struct ManualPostView: View {
                     Text("Added at the end of the caption.")
                 }
                 WhenSection(when: $when)
-                PushBackSection(day: when, isOn: $pushBack)
+                PushBackSection(day: when, excluding: IdeaLink.shared.idea?.id, isOn: $pushBack)
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await run(now: .instagram) } })
                 if items.contains(where: \.isVideo) {
@@ -172,6 +172,8 @@ struct ManualPostView: View {
         .task {
             await posts.refresh()
             if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
+            // Made from an idea planned on the calendar: keep its day.
+            if let planned = IdeaLink.shared.idea?.publishAt, planned > Date() { when = planned }
             autoPost = session.instagramByDefault
             youtube = session.youtubeByDefault
         }

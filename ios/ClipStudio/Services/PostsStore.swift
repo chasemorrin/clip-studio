@@ -16,6 +16,7 @@ struct Post: Identifiable, Hashable {
     var title: String
     var caption: String
     var notes: String = ""
+    var pillar: String = ""
     var createdAt: Date?
     var date: String
     var status: String
@@ -67,6 +68,7 @@ struct Post: Identifiable, Hashable {
         title = d["title"] as? String ?? ""
         caption = d["caption"] as? String ?? ""
         notes = d["notes"] as? String ?? ""
+        pillar = d["pillar"] as? String ?? ""
         createdAt = (d["createdAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
         date = d["date"] as? String ?? ""
         status = d["status"] as? String ?? "idea"
@@ -106,6 +108,9 @@ struct Post: Identifiable, Hashable {
     var isEditable: Bool { !isFullyPosted && state != .posting && youtube.state != .uploading }
 
     var hasVideo: Bool { media.contains(where: \.isVideo) }
+
+    /// Still just an idea (from the Ideas tab, no media yet). It can sit on the calendar as a plan.
+    var isIdea: Bool { pillar == "idea" && media.isEmpty }
 
     /// Something failed on either platform and can be retried.
     var canRetry: Bool { state == .failed || youtube.state == .failed }
@@ -163,9 +168,9 @@ final class PostsStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
 
-    /// Ideas: posts with no time yet, newest first.
+    /// Ideas (including ones planned on the calendar), newest first.
     var ideas: [Post] {
-        posts.filter { $0.publishAt == nil }
+        posts.filter { $0.publishAt == nil || $0.isIdea }
             .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
     }
 
@@ -179,9 +184,11 @@ final class PostsStore: ObservableObject {
         return (r["item"] as? [String: Any])?["id"] as? String ?? ""
     }
 
-    func updateIdea(_ idea: Post, title: String, notes: String, caption: String, format: String, status: String) async throws {
+    func updateIdea(_ idea: Post, title: String, notes: String, caption: String, format: String, status: String,
+                    publishAt: Date?) async throws {
         try await APIClient.shared.request("PATCH", "v1/items/\(idea.id)", json: [
             "title": title, "notes": notes, "caption": caption, "format": format, "status": status,
+            "publishAt": publishAt.map { $0.timeIntervalSince1970 as Any } ?? NSNull(),
         ])
         await refresh()
     }
