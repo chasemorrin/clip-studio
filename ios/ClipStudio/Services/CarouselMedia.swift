@@ -188,6 +188,8 @@ struct YouTubeTitlePreview: View {
     let tags: [String]
     /// When set, the title (with hashtags) can be typed in directly.
     var edit: Binding<String>? = nil
+    /// When set, a red "Copy Instagram caption" button sits on the header line.
+    var copyCaption: (() -> Void)? = nil
     /// What's typed, kept as-is so spaces at the end aren't lost while typing.
     @State private var draft = ""
 
@@ -200,7 +202,16 @@ struct YouTubeTitlePreview: View {
         let full = YouTubeText.fullTitle(base, tags: tags)
         let leftOff = YouTubeText.leftOff(base, tags: tags)
         VStack(alignment: .leading, spacing: 3) {
-            Text("Title on YouTube").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Text("Title on YouTube").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if let copyCaption {
+                    Spacer()
+                    Button("Copy Instagram caption", action: copyCaption)
+                        .font(.footnote)
+                        .buttonStyle(.borderless)
+                        .tint(.red)
+                }
+            }
             if let edit {
                 TextField("YouTube title", text: $draft, axis: .vertical)
                     .font(.callout)

@@ -260,24 +260,20 @@ struct YouTubeOptionsSection: View {
             .tint(.red)
             .disabled(!connected || posted)
             if isOn || posted {
-                if let instagramCaption, !posted,
-                   !instagramCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !compact, let copy = copyCaption {
                     HStack {
-                        if !compact {
-                            Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        }
+                        Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Copy Instagram caption") {
-                            title = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption)
-                        }
-                        .font(.footnote)
-                        .buttonStyle(.borderless)
-                        .tint(.red)
+                        Button("Copy Instagram caption", action: copy)
+                            .font(.footnote)
+                            .buttonStyle(.borderless)
+                            .tint(.red)
                     }
                 }
                 if compact, let hashtags {
                     YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue),
-                                        edit: editableTitle && !posted ? fullTitle(hashtags) : nil)
+                                        edit: editableTitle && !posted ? fullTitle(hashtags) : nil,
+                                        copyCaption: copyCaption)
                 } else {
                     TextField("YouTube title", text: $title, axis: .vertical)
                         .lineLimit(1...3)
@@ -317,6 +313,14 @@ struct YouTubeOptionsSection: View {
 
 /// A post's YouTube status: where it is, any error, and a link once it's up.
 extension YouTubeOptionsSection {
+    /// Copies the Instagram caption into the title, when there's one to copy.
+    var copyCaption: (() -> Void)? {
+        guard let instagramCaption, status?.state != .posted,
+              !instagramCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let t = $title
+        return { t.wrappedValue = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption) }
+    }
+
     /// The title with its hashtags as one editable string; edits split back into title and hashtags.
     func fullTitle(_ hashtags: Binding<String>) -> Binding<String> {
         Binding(
