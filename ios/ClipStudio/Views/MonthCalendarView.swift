@@ -240,6 +240,7 @@ struct MonthCalendarView: View {
                                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                                     .contentShape(Rectangle())
                                     .onTapGesture { if post.isEditable { editing = post } }
+                                    .contextMenu { PostMenu(post: post, editing: $editing) }
                                     .padding(.horizontal)
                                     .frame(maxHeight: .infinity, alignment: .top)
                                     .containerRelativeFrame(.vertical)

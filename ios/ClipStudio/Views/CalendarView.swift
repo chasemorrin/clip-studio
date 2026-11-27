@@ -147,59 +147,7 @@ struct CalendarView: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(target ? Theme.accent : Color.clear, lineWidth: 2))
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .onTapGesture { if post.isEditable { editing = post } }
-            .contextMenu { actions(post) }
-    }
-
-    /// Instagram is switched on for this post (and can still post).
-    private func instagramOn(_ post: Post) -> Bool {
-        session.instagramUsername != nil && (post.state == .scheduled || post.state == .failed)
-    }
-
-    /// YouTube is switched on for this post (and can still post).
-    private func youtubeOn(_ post: Post) -> Bool {
-        session.youtubeChannel != nil && post.hasVideo
-            && (post.youtube.state == .scheduled || post.youtube.state == .failed)
-    }
-
-    @ViewBuilder
-    private func actions(_ post: Post) -> some View {
-        if post.isEditable {
-            Button { editing = post } label: { menuLabel("Edit", "pencil") }
-            if instagramOn(post) || youtubeOn(post) {
-                // Posts now to whichever platforms are switched on for this post.
-                Button { postNow(post) } label: { menuLabel("Post Now", "paperplane.fill") }
-                // Switches off whichever platforms are switched on; it stays on the calendar.
-                Button { dontPost(post) } label: { menuLabel("Don't Post", "xmark.circle") }
-            }
-        }
-        if post.state != .posting && post.youtube.state != .uploading {
-            Button(role: .destructive) { Task { await posts.delete(post) } } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-    }
-
-    private func menuLabel(_ title: String, _ icon: String) -> some View {
-        Label {
-            Text(title)
-        } icon: {
-            Image(systemName: icon).renderingMode(.template).foregroundStyle(.white)
-        }
-    }
-
-    private func postNow(_ post: Post) {
-        let ig = instagramOn(post), yt = youtubeOn(post)
-        Task {
-            do {
-                try await posts.postNow(id: post.id, instagram: ig, youtube: yt)
-            } catch {
-                posts.error = error.localizedDescription
-            }
-        }
-    }
-
-    private func dontPost(_ post: Post) {
-        Task { await posts.stopPosting(post, instagram: instagramOn(post), youtube: youtubeOn(post)) }
+            .contextMenu { PostMenu(post: post, editing: $editing) }
     }
 
     /// Posts that can still change can be picked up and dropped on another post.
@@ -234,6 +182,64 @@ struct CalendarView: View {
         }
         pendingSwap = PendingSwap(dragged: dragged, target: target)
         return true
+    }
+}
+
+/// Touch and hold a post (List or Month): Edit, Post Now, Don't Post, Delete.
+struct PostMenu: View {
+    let post: Post
+    @Binding var editing: Post?
+    @EnvironmentObject var posts: PostsStore
+    @EnvironmentObject var session: SessionStore
+
+    /// Instagram is switched on for this post (and can still post).
+    private var instagramOn: Bool {
+        session.instagramUsername != nil && (post.state == .scheduled || post.state == .failed)
+    }
+
+    /// YouTube is switched on for this post (and can still post).
+    private var youtubeOn: Bool {
+        session.youtubeChannel != nil && post.hasVideo
+            && (post.youtube.state == .scheduled || post.youtube.state == .failed)
+    }
+
+    var body: some View {
+        if post.isEditable {
+            Button { editing = post } label: { item("Edit", "pencil") }
+            if instagramOn || youtubeOn {
+                // Posts now to whichever platforms are switched on for this post.
+                Button {
+                    let ig = instagramOn, yt = youtubeOn
+                    Task {
+                        do { try await posts.postNow(id: post.id, instagram: ig, youtube: yt) }
+                        catch { posts.error = error.localizedDescription }
+                    }
+                } label: { item("Post Now", "paperplane.fill") }
+                // Switches off whichever platforms are on; it stays on the calendar.
+                Button {
+                    let ig = instagramOn, yt = youtubeOn
+                    Task { await posts.stopPosting(post, instagram: ig, youtube: yt) }
+                } label: { item("Don't Post", "xmark.circle") }
+            }
+        }
+        if post.state != .posting && post.youtube.state != .uploading {
+            Button(role: .destructive) { Task { await posts.delete(post) } } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    /// Menus tint icons with the app's gold; an "original" white image keeps its color.
+    private func item(_ title: String, _ icon: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            if let ui = UIImage(systemName: icon)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                Image(uiImage: ui)
+            } else {
+                Image(systemName: icon)
+            }
+        }
     }
 }
 
