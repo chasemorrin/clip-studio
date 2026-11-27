@@ -186,13 +186,34 @@ enum BackgroundWork {
 struct YouTubeTitlePreview: View {
     let base: String
     let tags: [String]
+    /// When set, the title (with hashtags) can be typed in directly.
+    var edit: Binding<String>? = nil
+    /// What's typed, kept as-is so spaces at the end aren't lost while typing.
+    @State private var draft = ""
+
+    private func normalized(_ s: String) -> String {
+        let p = YouTubeText.split(s)
+        return YouTubeText.fullTitle(p.base, tags: p.tags)
+    }
 
     var body: some View {
         let full = YouTubeText.fullTitle(base, tags: tags)
         let leftOff = YouTubeText.leftOff(base, tags: tags)
         VStack(alignment: .leading, spacing: 3) {
             Text("Title on YouTube").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(full.isEmpty ? "—" : full).font(.callout)
+            if let edit {
+                TextField("YouTube title", text: $draft, axis: .vertical)
+                    .font(.callout)
+                    .lineLimit(1...4)
+                    .onAppear { draft = edit.wrappedValue }
+                    .onChange(of: draft) { _, v in edit.wrappedValue = v }
+                    .onChange(of: edit.wrappedValue) { _, v in
+                        // Changed from outside (Copy Instagram caption): show it.
+                        if normalized(draft) != v { draft = v }
+                    }
+            } else {
+                Text(full.isEmpty ? "—" : full).font(.callout)
+            }
             if full.count > YouTubeText.limit {
                 Text(leftOff.isEmpty
                      ? "\(full.count)/\(YouTubeText.limit) characters: too long for YouTube. The title will be cut short."

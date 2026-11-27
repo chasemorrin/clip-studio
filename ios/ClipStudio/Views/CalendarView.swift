@@ -224,17 +224,17 @@ struct PostMenu: View {
         }
         if post.state != .posting && post.youtube.state != .uploading {
             Button(role: .destructive) { Task { await posts.delete(post) } } label: {
-                Label("Delete", systemImage: "trash")
+                item("Delete", "trash", color: .systemRed)
             }
         }
     }
 
     /// Menus tint icons with the app's gold; an "original" white image keeps its color.
-    private func item(_ title: String, _ icon: String) -> some View {
+    private func item(_ title: String, _ icon: String, color: UIColor = .white) -> some View {
         Label {
             Text(title)
         } icon: {
-            if let ui = UIImage(systemName: icon)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+            if let ui = UIImage(systemName: icon)?.withTintColor(color, renderingMode: .alwaysOriginal) {
                 Image(uiImage: ui)
             } else {
                 Image(systemName: icon)
@@ -374,7 +374,8 @@ struct PostEditSheet: View {
                 if current.hasVideo || current.youtube.isOn {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, status: current.youtube, busy: saving,
                                           postNow: current.hasVideo ? { Task { await postNow(.youtube) } } : nil,
-                                          hashtags: $youtubeTags, instagramCaption: caption)
+                                          hashtags: $youtubeTags, compact: true, editableTitle: true,
+                                          instagramCaption: caption)
                 }
                 if !current.media.isEmpty {
                     Section {

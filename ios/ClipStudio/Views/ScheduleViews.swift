@@ -39,7 +39,7 @@ struct ScheduleSheet: View {
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
                                       postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags,
-                                      editableHashtags: false)
+                                      compact: true)
                 if !clip.carousel.isEmpty {
                     Section {
                         Label("Carousel of \(clip.carousel.count + 1) on Instagram. YouTube gets just the clip.",
@@ -237,8 +237,10 @@ struct YouTubeOptionsSection: View {
     var postNow: (() -> Void)? = nil
     /// The Short's hashtags (copied from Instagram; can be changed here).
     var hashtags: Binding<String>? = nil
-    /// False when scheduling a clip: its hashtags were set in the editor, so only the preview shows.
-    var editableHashtags = true
+    /// Shows just "Title on YouTube" (title with hashtags) instead of separate title and hashtag fields.
+    var compact = false
+    /// With `compact`: lets you edit "Title on YouTube" directly (the Calendar's edit page).
+    var editableTitle = false
     /// The Instagram caption, for "Copy Instagram caption" into the title.
     var instagramCaption: String? = nil
     @EnvironmentObject var session: SessionStore
@@ -261,26 +263,32 @@ struct YouTubeOptionsSection: View {
                 if let instagramCaption, !posted,
                    !instagramCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack {
-                        Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        if !compact {
+                            Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Button("Copy Instagram caption") {
                             title = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption)
                         }
                         .font(.footnote)
                         .buttonStyle(.borderless)
+                        .tint(.red)
                     }
                 }
-                TextField("YouTube title", text: $title, axis: .vertical)
-                    .lineLimit(1...3)
-                    .disabled(posted)
-                    .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
-                if let hashtags {
-                    if editableHashtags {
+                if compact, let hashtags {
+                    YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue),
+                                        edit: editableTitle && !posted ? fullTitle(hashtags) : nil)
+                } else {
+                    TextField("YouTube title", text: $title, axis: .vertical)
+                        .lineLimit(1...3)
+                        .disabled(posted)
+                        .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
+                    if let hashtags {
                         HashtagField(text: hashtags, label: "YouTube hashtags")
                             .disabled(posted)
-                    }
-                    if !posted {
-                        YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue))
+                        if !posted {
+                            YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue))
+                        }
                     }
                 }
             }
@@ -308,6 +316,19 @@ struct YouTubeOptionsSection: View {
 }
 
 /// A post's YouTube status: where it is, any error, and a link once it's up.
+extension YouTubeOptionsSection {
+    /// The title with its hashtags as one editable string; edits split back into title and hashtags.
+    func fullTitle(_ hashtags: Binding<String>) -> Binding<String> {
+        Binding(
+            get: { YouTubeText.fullTitle(title, tags: DefaultHashtags.parse(hashtags.wrappedValue)) },
+            set: { v in
+                let parts = YouTubeText.split(v)
+                title = parts.base
+                hashtags.wrappedValue = DefaultHashtags.format(parts.tags)
+            })
+    }
+}
+
 struct YouTubeStatusView: View {
     let status: Post.YouTubeStatus
 
