@@ -38,7 +38,8 @@ struct ScheduleSheet: View {
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags)
+                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags,
+                                      editableHashtags: false)
                 if !clip.carousel.isEmpty {
                     Section {
                         Label("Carousel of \(clip.carousel.count + 1) on Instagram. YouTube gets just the clip.",
@@ -236,6 +237,8 @@ struct YouTubeOptionsSection: View {
     var postNow: (() -> Void)? = nil
     /// The Short's hashtags (copied from Instagram; can be changed here).
     var hashtags: Binding<String>? = nil
+    /// False when scheduling a clip: its hashtags were set in the editor, so only the preview shows.
+    var editableHashtags = true
     /// The Instagram caption, for "Copy Instagram caption" into the title.
     var instagramCaption: String? = nil
     @EnvironmentObject var session: SessionStore
@@ -272,8 +275,10 @@ struct YouTubeOptionsSection: View {
                     .disabled(posted)
                     .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
                 if let hashtags {
-                    HashtagField(text: hashtags, label: "YouTube hashtags")
-                        .disabled(posted)
+                    if editableHashtags {
+                        HashtagField(text: hashtags, label: "YouTube hashtags")
+                            .disabled(posted)
+                    }
                     if !posted {
                         YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue))
                     }

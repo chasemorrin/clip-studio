@@ -150,36 +150,56 @@ struct CalendarView: View {
             .contextMenu { actions(post) }
     }
 
+    /// Instagram is switched on for this post (and can still post).
+    private func instagramOn(_ post: Post) -> Bool {
+        session.instagramUsername != nil && (post.state == .scheduled || post.state == .failed)
+    }
+
+    /// YouTube is switched on for this post (and can still post).
+    private func youtubeOn(_ post: Post) -> Bool {
+        session.youtubeChannel != nil && post.hasVideo
+            && (post.youtube.state == .scheduled || post.youtube.state == .failed)
+    }
+
     @ViewBuilder
     private func actions(_ post: Post) -> some View {
         if post.isEditable {
-            Button("Edit", systemImage: "pencil") { editing = post }
-            if session.instagramUsername != nil, post.state != .posted {
-                Button("Post to Instagram now", systemImage: "paperplane.fill") { postNow(post, instagram: true) }
-            }
-            if session.youtubeChannel != nil, post.hasVideo, post.youtube.state != .posted {
-                Button("Post to YouTube now", systemImage: "play.rectangle") { postNow(post, instagram: false) }
-            }
-            if post.canRetry {
-                Button("Retry", systemImage: "arrow.clockwise") { Task { await posts.retry(post) } }
-            }
-            if post.state == .scheduled {
-                Button("Don't post to Instagram", systemImage: "pause") { Task { await posts.setAutoPost(post, false) } }
+            Button { editing = post } label: { menuLabel("Edit", "pencil") }
+            if instagramOn(post) || youtubeOn(post) {
+                // Posts now to whichever platforms are switched on for this post.
+                Button { postNow(post) } label: { menuLabel("Post Now", "paperplane.fill") }
+                // Switches off whichever platforms are switched on; it stays on the calendar.
+                Button { dontPost(post) } label: { menuLabel("Don't Post", "xmark.circle") }
             }
         }
         if post.state != .posting && post.youtube.state != .uploading {
-            Button("Delete", systemImage: "trash", role: .destructive) { Task { await posts.delete(post) } }
+            Button(role: .destructive) { Task { await posts.delete(post) } } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 
-    private func postNow(_ post: Post, instagram: Bool) {
+    private func menuLabel(_ title: String, _ icon: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: icon).renderingMode(.template).foregroundStyle(.white)
+        }
+    }
+
+    private func postNow(_ post: Post) {
+        let ig = instagramOn(post), yt = youtubeOn(post)
         Task {
             do {
-                try await posts.postNow(id: post.id, instagram: instagram, youtube: !instagram)
+                try await posts.postNow(id: post.id, instagram: ig, youtube: yt)
             } catch {
                 posts.error = error.localizedDescription
             }
         }
+    }
+
+    private func dontPost(_ post: Post) {
+        Task { await posts.stopPosting(post, instagram: instagramOn(post), youtube: youtubeOn(post)) }
     }
 
     /// Posts that can still change can be picked up and dropped on another post.

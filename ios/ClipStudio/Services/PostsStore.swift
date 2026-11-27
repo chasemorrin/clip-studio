@@ -490,6 +490,18 @@ final class PostsStore: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Switches off auto-posting for Instagram and/or YouTube. The post stays on the calendar.
+    func stopPosting(_ post: Post, instagram: Bool, youtube: Bool) async {
+        var body: [String: Any] = [:]
+        if instagram { body["autoPost"] = false }
+        if youtube { body["youtube"] = false }
+        guard !body.isEmpty else { return }
+        do {
+            try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
+            await refresh()
+        } catch { self.error = error.localizedDescription }
+    }
+
     func retry(_ post: Post) async {
         do {
             try await APIClient.shared.request("POST", "v1/items/\(post.id)/retry")

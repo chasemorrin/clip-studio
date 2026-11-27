@@ -227,7 +227,6 @@ struct ClipEditorView: View {
                         }
                     Text("Copied from Instagram's hashtags. Change them here to use different ones on YouTube.")
                         .font(.caption).foregroundStyle(.secondary)
-                    YouTubeTitlePreview(base: clip.youtubeTitle ?? clip.title, tags: clip.youtubeHashtags ?? clip.hashtags)
                 }
 
                 if onSaveToPost == nil {
