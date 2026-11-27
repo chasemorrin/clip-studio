@@ -143,12 +143,17 @@ struct IdeaRow: View {
                 IdeaStatusPill(status: idea.status)
                 Text(idea.format.capitalized).font(.caption2).foregroundStyle(.secondary)
                 if let at = idea.publishAt {
-                    Label(at.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                        Text(at.formatted(.dateTime.month(.abbreviated).day()))
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
                 }
             }
         }
         .contentShape(Rectangle())
+        // Keep the divider under each idea full width.
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
     }
 }
 
