@@ -75,11 +75,10 @@ struct HomeView: View {
         NavigationStack {
           ScrollView {
             VStack(spacing: 24) {
-                HStack(spacing: 14) {
-                    Text("Clip")
+                HStack(spacing: 12) {
                     Image(systemName: "film.stack")
-                        .font(.system(size: 56, weight: .light))
-                    Text("Studio")
+                        .font(.system(size: 48, weight: .light))
+                    Text("Clip Studio")
                 }
                 .font(.largeTitle.bold())
                 .foregroundStyle(Theme.accent)
