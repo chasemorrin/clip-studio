@@ -53,7 +53,13 @@ struct CaptionTextView: UIViewRepresentable {
 
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.parent = self
-        if v.text != text { v.text = text }
+        // Text changed from outside (e.g. a tag inserted): keep the cursor where it was, not at the end.
+        if v.text != text {
+            let sel = v.selectedRange
+            v.text = text
+            let len = (text as NSString).length
+            v.selectedRange = NSRange(location: min(sel.location, len), length: 0)
+        }
         if let p = pendingCursor {
             let loc = min(p, (v.text as NSString).length)
             v.selectedRange = NSRange(location: loc, length: 0)
@@ -70,10 +76,11 @@ struct CaptionTextView: UIViewRepresentable {
 
         func textViewDidChange(_ v: UITextView) {
             let t = v.text ?? ""
+            // Send the text right away (a UIKit callback, not a SwiftUI update) so SwiftUI never
+            // holds an older copy that would be written back over what's being typed.
+            if parent.text != t { parent.text = t }
             let c = v.selectedRange.location
-            // Update SwiftUI after this UIKit callback finishes, never during a view update.
             DispatchQueue.main.async {
-                if self.parent.text != t { self.parent.text = t }
                 if self.parent.cursor != c { self.parent.cursor = c }
             }
         }
