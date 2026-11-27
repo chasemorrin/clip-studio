@@ -21,13 +21,16 @@ struct ClipSuggestion: Identifiable, Hashable {
     var youtubeTitle: String? = nil
     /// The Short's hashtags, if different from Instagram's (nil = the same).
     var youtubeHashtags: [String]? = nil
+    /// Photos or videos added after the clip to make a carousel (optional so older saved clips still load).
+    var extras: [ExtraMedia]? = nil
+    var carousel: [ExtraMedia] { extras ?? [] }
 }
 
 /// Saved with the project so its clips come back after leaving the screen. The exported file
 /// (renderedURL) lives in a temporary folder, so it isn't saved; it's made again when needed.
 extension ClipSuggestion: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, start, end, title, why, onScreenText, caption, hashtags, keep, fromClaude, framing, scheduledFor, youtubeTitle, youtubeHashtags
+        case id, start, end, title, why, onScreenText, caption, hashtags, keep, fromClaude, framing, scheduledFor, youtubeTitle, youtubeHashtags, extras
     }
 }
 

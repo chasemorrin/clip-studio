@@ -236,10 +236,12 @@ final class PostsStore: ObservableObject {
     /// Uploads a finished clip and puts it on the calendar. Returns the new post's id.
     @discardableResult
     func schedule(file: URL, clip: ClipSuggestion, at date: Date, autoPost: Bool, youtube: Bool = false, youtubeTitle: String? = nil,
-                  sourceAssetID: String? = nil) async throws -> String {
+                  extraMedia: [(key: String, type: String)] = [], sourceAssetID: String? = nil) async throws -> String {
         let media = try await APIClient.shared.upload(file: file)
-        return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why, format: "reel",
-                                media: [media], at: date, autoPost: autoPost, youtube: youtube, youtubeTitle: youtubeTitle,
+        // Extra photos/videos make it a carousel; YouTube still gets the clip (the first video).
+        return try await create(title: clip.title, caption: clip.fullCaption, notes: clip.why,
+                                format: extraMedia.isEmpty ? "reel" : "carousel",
+                                media: [media] + extraMedia, at: date, autoPost: autoPost, youtube: youtube, youtubeTitle: youtubeTitle,
                                 youtubeDescription: clip.youtubeDescription,
                                 plan: sourceAssetID.flatMap { ClipPlan(clip: clip, assetId: $0).json })
     }
@@ -247,14 +249,16 @@ final class PostsStore: ObservableObject {
     /// Replaces a scheduled clip's video after re-editing it, and removes the old file.
     func replaceClip(_ post: Post, file: URL, clip: ClipSuggestion, sourceAssetID: String?) async throws {
         let media = try await APIClient.shared.upload(file: file)
+        // Only the clip (the first item) changes; a carousel's other items stay.
+        let rest = post.media.dropFirst().map { ["key": $0.key, "type": $0.type] }
         var body: [String: Any] = [
             "title": clip.title,
             "caption": clip.fullCaption,
-            "media": [["key": media.key, "type": media.type]],
+            "media": [["key": media.key, "type": media.type]] + rest,
         ]
         if let sourceAssetID, let plan = ClipPlan(clip: clip, assetId: sourceAssetID).json { body["plan"] = plan }
         try await APIClient.shared.request("PATCH", "v1/items/\(post.id)", json: body)
-        for old in post.media where old.key != media.key {
+        if let old = post.media.first, old.key != media.key {
             _ = try? await APIClient.shared.request("DELETE", "v1/media/\(old.key)")
         }
         await refresh()

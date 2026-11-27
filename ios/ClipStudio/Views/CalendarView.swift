@@ -379,7 +379,7 @@ struct PostEditSheet: View {
                                 let push = pushBack && movedDay
                                 try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
                                                        youtube: session.youtubeChannel != nil ? youtube : nil,
-                                                       youtubeTitle: youtube ? youtubeTitle : nil,
+                                                       youtubeTitle: youtube ? fullYouTubeTitle : nil,
                                                        youtubeDescription: youtubeDescription)
                                 await posts.pushBackAfterScheduling(push, day: when, newID: post.id)
                                 dismiss()
@@ -397,8 +397,11 @@ struct PostEditSheet: View {
                 title = post.title
                 autoPost = post.state == .scheduled || post.state == .failed
                 youtube = post.youtube.isOn
-                youtubeTitle = post.youtube.title ?? post.title
-                youtubeTags = DefaultHashtags.format(DefaultHashtags.split(post.youtube.description ?? post.caption).tags)
+                // The saved title already ends in its hashtags: split them back out to edit.
+                let saved = YouTubeText.split(post.youtube.title ?? post.title)
+                youtubeTitle = saved.base
+                youtubeTags = DefaultHashtags.format(saved.tags.isEmpty
+                    ? DefaultHashtags.split(post.youtube.description ?? post.caption).tags : saved.tags)
             }
             .onChange(of: current.media.map(\.key)) { _, _ in savedToPhotos = false }
             // After re-editing the clip, pick up its new title and caption.
@@ -409,13 +412,18 @@ struct PostEditSheet: View {
 }
 
 extension PostEditSheet {
+    /// The title YouTube gets: the title with the hashtags at the end (as many as fit).
+    var fullYouTubeTitle: String {
+        YouTubeText.title(youtubeTitle, tags: DefaultHashtags.parse(youtubeTags))
+    }
+
     /// Saves the changes, then posts to one platform right away. The other keeps its scheduled time.
     func postNow(_ target: PostNowTarget) async {
         saving = true
         defer { saving = false }
         do {
             try await posts.update(current, title: title, publishAt: when, caption: caption, autoPost: autoPost,
-                                   youtube: session.youtubeChannel != nil ? youtube : nil, youtubeTitle: youtubeTitle,
+                                   youtube: session.youtubeChannel != nil ? youtube : nil, youtubeTitle: fullYouTubeTitle,
                                    youtubeDescription: youtubeDescription)
             try await posts.postNow(id: post.id, instagram: target == .instagram, youtube: target == .youtube)
             dismiss()

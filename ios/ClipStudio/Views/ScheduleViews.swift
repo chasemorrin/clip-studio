@@ -38,14 +38,12 @@ struct ScheduleSheet: View {
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await schedule(now: .instagram) } }, captionText: clip.fullCaption)
                 YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
-                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags,
-                                      instagramCaption: clip.caption)
-                if let working {
+                                      postNow: { Task { await schedule(now: .youtube) } }, hashtags: $youtubeTags)
+                if !clip.carousel.isEmpty {
                     Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let progress { ProgressView(value: progress) } else { ProgressView() }
-                            Text(working).font(.footnote).foregroundStyle(.secondary)
-                        }
+                        Label("Carousel of \(clip.carousel.count + 1) on Instagram. YouTube gets just the clip.",
+                              systemImage: "square.stack")
+                            .font(.footnote)
                     }
                 }
                 if let error {
@@ -61,6 +59,7 @@ struct ScheduleSheet: View {
                 }
             }
             .interactiveDismissDisabled(working != nil)
+            .workingOverlay(working, progress: progress)
             .task {
                 await posts.refresh()
                 nextSlot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first
@@ -75,6 +74,10 @@ struct ScheduleSheet: View {
 
     private func schedule(now: PostNowTarget? = nil) async {
         error = nil
+        await BackgroundWork.run("Scheduling post") { await doSchedule(now: now) }
+    }
+
+    private func doSchedule(now: PostNowTarget?) async {
         do {
             let file: URL
             if let done = clip.renderedURL, FileManager.default.fileExists(atPath: done.path) {
@@ -87,12 +90,20 @@ struct ScheduleSheet: View {
                 }
                 clip.renderedURL = file
             }
+            var extras: [(key: String, type: String)] = []
+            if !clip.carousel.isEmpty {
+                extras = try await ExtraMedia.upload(clip.carousel) { label, p in
+                    working = label
+                    progress = p
+                }
+            }
             working = "Uploading…"
             progress = nil
             let ytTags = DefaultHashtags.parse(youtubeTags)
             clip.youtubeHashtags = ytTags == clip.hashtags ? nil : ytTags
             let id = try await posts.schedule(file: file, clip: clip, at: when, autoPost: instagramConnected && autoPost,
-                                              youtube: toYouTube, youtubeTitle: youtubeTitle, sourceAssetID: analysis.sourceAssetID)
+                                              youtube: toYouTube, youtubeTitle: YouTubeText.title(youtubeTitle, tags: ytTags),
+                                              extraMedia: extras, sourceAssetID: analysis.sourceAssetID)
             clip.youtubeTitle = youtubeTitle == clip.title ? nil : youtubeTitle
             switch now {
             case .instagram:
@@ -263,6 +274,9 @@ struct YouTubeOptionsSection: View {
                 if let hashtags {
                     HashtagField(text: hashtags, label: "YouTube hashtags")
                         .disabled(posted)
+                    if !posted {
+                        YouTubeTitlePreview(base: title, tags: DefaultHashtags.parse(hashtags.wrappedValue))
+                    }
                 }
             }
             if let status, status.isOn {
@@ -281,7 +295,7 @@ struct YouTubeOptionsSection: View {
             if !connected {
                 Text("Connect YouTube in Settings to post Shorts too.")
             } else if !posted {
-                Text(isOn ? "Same time and caption as Instagram, with these hashtags. Title up to 100 characters (\(title.count) now)."
+                Text(isOn ? "Same time as Instagram. The hashtags go at the end of the title, the way they go at the end of the Instagram caption."
                           : "Post now works even when this is off.")
             }
         }
@@ -459,15 +473,7 @@ struct BatchScheduleSheet: View {
                     } footer: {
                         if !instagramConnected { Text("Connect Instagram in Settings to post automatically.") }
                         else if session.youtubeChannel == nil { Text("Connect YouTube in Settings to post Shorts too.") }
-                        else if youtube { Text("Each Short uses the clip's title. You can change it per post in Calendar.") }
-                    }
-                }
-                if let working {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let progress { ProgressView(value: progress) } else { ProgressView() }
-                            Text(working).font(.footnote).foregroundStyle(.secondary)
-                        }
+                        else if youtube { Text("Each Short uses the clip's YouTube title with its hashtags at the end. You can change it per post in Calendar.") }
                     }
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
@@ -482,6 +488,7 @@ struct BatchScheduleSheet: View {
                 }
             }
             .interactiveDismissDisabled(working != nil)
+            .workingOverlay(working, progress: progress)
             .task {
                 await posts.refresh()
                 let slots = PostingSchedule.nextSlots(pending.count, taken: posts.takenDays)
@@ -498,6 +505,10 @@ struct BatchScheduleSheet: View {
 
     private func run() async {
         error = nil
+        await BackgroundWork.run("Scheduling clips") { await runBatch() }
+    }
+
+    private func runBatch() async {
         let batch = pending
         for (n, c) in batch.enumerated() {
             guard let i = model.clips.firstIndex(where: { $0.id == c.id }) else { continue }
@@ -512,12 +523,21 @@ struct BatchScheduleSheet: View {
                     }
                     model.clips[i].renderedURL = file
                 }
+                var extras: [(key: String, type: String)] = []
+                if !model.clips[i].carousel.isEmpty {
+                    extras = try await ExtraMedia.upload(model.clips[i].carousel) { step, p in
+                        working = "\(label): \(step)"
+                        progress = p
+                    }
+                }
                 working = "\(label): uploading…"
                 progress = nil
                 let when = times[c.id] ?? Date().addingTimeInterval(3600)
-                try await posts.schedule(file: file!, clip: model.clips[i], at: when, autoPost: autoPost && instagramConnected,
-                                         youtube: youtube && session.youtubeChannel != nil, youtubeTitle: model.clips[i].youtubeTitle,
-                                         sourceAssetID: analysis.sourceAssetID)
+                let clip = model.clips[i]
+                let ytTitle = YouTubeText.title(clip.youtubeTitle ?? clip.title, tags: clip.youtubeHashtags ?? clip.hashtags)
+                try await posts.schedule(file: file!, clip: clip, at: when, autoPost: autoPost && instagramConnected,
+                                         youtube: youtube && session.youtubeChannel != nil, youtubeTitle: ytTitle,
+                                         extraMedia: extras, sourceAssetID: analysis.sourceAssetID)
                 model.clips[i].scheduledFor = when
                 done += 1
             } catch {

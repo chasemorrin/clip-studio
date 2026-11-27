@@ -62,8 +62,8 @@ struct ManualPostView: View {
     @State private var finished: String?
 
     private var instagramConnected: Bool { session.instagramUsername != nil }
-    /// YouTube takes a single video (a Short), not photos or carousels.
-    private var toYouTube: Bool { youtube && format == "reel" && session.youtubeChannel != nil }
+    /// YouTube takes a single video (a Short): a carousel sends its first video.
+    private var toYouTube: Bool { youtube && items.contains(where: \.isVideo) && session.youtubeChannel != nil }
 
     private var format: String {
         items.count > 1 ? "carousel" : (items.first?.isVideo == true ? "reel" : "photo")
@@ -125,7 +125,9 @@ struct ManualPostView: View {
                 Section {
                     CaptionEditor(text: $caption, minHeight: 120)
                 } header: {
-                    Text("Instagram caption")
+                    Label { Text("Instagram caption") } icon: {
+                        Image(systemName: "camera.fill").foregroundStyle(Theme.accent)
+                    }
                 }
                 Section {
                     HashtagField(text: $hashtags)
@@ -140,10 +142,15 @@ struct ManualPostView: View {
                 PushBackSection(day: when, isOn: $pushBack)
                 InstagramPostSection(autoPost: $autoPost, busy: working != nil,
                                      postNow: { Task { await run(now: .instagram) } })
-                if format == "reel" {
+                if items.contains(where: \.isVideo) {
                     YouTubeOptionsSection(isOn: $youtube, title: $youtubeTitle, busy: working != nil,
                                           postNow: { Task { await run(now: .youtube) } }, hashtags: $youtubeTags,
                                           instagramCaption: caption)
+                    if format == "carousel" && youtube {
+                        Text("YouTube Shorts gets just the first video in the carousel.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .listRowBackground(Color.clear)
+                    }
                 }
                 Section {
                     Button {
@@ -155,20 +162,13 @@ struct ManualPostView: View {
                 .disabled(working != nil)
             }
 
-            if let working {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let progress { ProgressView(value: progress) } else { ProgressView() }
-                        Text(working).font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-            }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Finished post")
         .navigationBarTitleDisplayMode(.inline)
         .interactiveDismissDisabled(working != nil)
+        .workingOverlay(working, progress: progress)
         .task {
             await posts.refresh()
             if let slot = PostingSchedule.nextSlots(1, taken: posts.takenDays).first { when = slot }
@@ -179,6 +179,11 @@ struct ManualPostView: View {
 
     private func run(now: PostNowTarget?) async {
         error = nil
+        await BackgroundWork.run("Scheduling post") { await upload(now: now) }
+        working = nil
+    }
+
+    private func upload(now: PostNowTarget?) async {
         var media: [(key: String, type: String)] = []
         do {
             for (i, item) in items.enumerated() {
@@ -207,7 +212,8 @@ struct ManualPostView: View {
             let name = title.isEmpty ? "Untitled post" : title
             let id = try await posts.create(title: name, caption: DefaultHashtags.caption(caption, tags: hashtags), format: format,
                                             media: media, at: when, autoPost: instagramConnected && autoPost,
-                                            youtube: toYouTube, youtubeTitle: youtubeTitle.isEmpty ? name : youtubeTitle,
+                                            youtube: toYouTube, youtubeTitle: YouTubeText.title(youtubeTitle.isEmpty ? name : youtubeTitle,
+                                                                           tags: DefaultHashtags.parse(youtubeTags)),
                                             youtubeDescription: DefaultHashtags.caption(caption, tags: youtubeTags))
             switch now {
             case .instagram: try await posts.postNow(id: id, instagram: true, youtube: false)

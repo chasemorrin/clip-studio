@@ -143,7 +143,7 @@ struct ClipEditorView: View {
                 WaveformStrip(analysis: analysis, start: clip.start, end: clip.end, playhead: looper.currentTime) { t in
                     looper.seek(to: min(t, clip.end - 0.1))
                 }
-                .frame(height: 72)
+                .frame(height: 90)
 
                 HStack(spacing: 10) {
                     Button { looper.togglePlay() } label: {
@@ -175,7 +175,8 @@ struct ClipEditorView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
+                    HStack(spacing: 4) {
+                        Image(systemName: "camera.fill").foregroundStyle(Theme.accent)
                         Text("Instagram caption").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         Spacer()
                         Button("Copy caption") { UIPasteboard.general.string = clip.fullCaption; message = "Caption copied." }
@@ -203,6 +204,7 @@ struct ClipEditorView: View {
                             clip.youtubeTitle = t.isEmpty ? nil : t
                         }
                         .font(.footnote)
+                        .tint(.red)
                         .disabled(clip.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     TextField(clip.title.isEmpty ? "Title for the Short" : clip.title,
@@ -211,7 +213,7 @@ struct ClipEditorView: View {
                               axis: .vertical)
                         .lineLimit(1...3)
                         .textFieldStyle(.roundedBorder)
-                    Text("Up to 100 characters. Leave empty to use the title above.")
+                    Text("Leave empty to use the title above. The hashtags below go at the end of it.")
                         .font(.caption).foregroundStyle(.secondary)
                     HashtagField(text: $youtubeTagText, label: "YouTube hashtags")
                         .onAppear { youtubeTagText = DefaultHashtags.format(clip.youtubeHashtags ?? clip.hashtags) }
@@ -223,8 +225,14 @@ struct ClipEditorView: View {
                             // Follow Instagram's hashtags until they're changed here.
                             if clip.youtubeHashtags == nil { youtubeTagText = DefaultHashtags.format(tags) }
                         }
-                    Text("Copied from Instagram's hashtags. Change them here to use different ones on YouTube. The Short's description is the caption with these.")
+                    Text("Copied from Instagram's hashtags. Change them here to use different ones on YouTube.")
                         .font(.caption).foregroundStyle(.secondary)
+                    YouTubeTitlePreview(base: clip.youtubeTitle ?? clip.title, tags: clip.youtubeHashtags ?? clip.hashtags)
+                }
+
+                if onSaveToPost == nil {
+                    CarouselEditor(items: Binding(get: { clip.carousel },
+                                                  set: { clip.extras = $0.isEmpty ? nil : $0 }))
                 }
 
                 Toggle("Keep this clip", isOn: $clip.keep)
@@ -442,6 +450,39 @@ struct WaveformStrip: View {
     }
 
     var body: some View {
+        VStack(spacing: 2) {
+            labels
+            strip.accessibilityLabel(accessibilityText)
+        }
+    }
+
+    /// Start and end times over their markers, and the clip's length in the middle.
+    private var labels: some View {
+        GeometryReader { geo in
+            let (lo, hi) = window
+            let w = geo.size.width
+            let x = { (t: Double) -> CGFloat in hi > lo ? CGFloat((t - lo) / (hi - lo)) * w : 0 }
+            ZStack {
+                Text(String(format: "%.1f s", end - start))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                    .position(x: w / 2, y: 8)
+                Text(timecode(start, tenths: true))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize()
+                    .position(x: min(max(x(start), 24), w - 24), y: 8)
+                Text(timecode(end, tenths: true))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize()
+                    .position(x: min(max(x(end), 24), w - 24), y: 8)
+            }
+        }
+        .frame(height: 16)
+    }
+
+    private var strip: some View {
         GeometryReader { geo in
             Canvas { ctx, size in
                 let (lo, hi) = window
@@ -484,6 +525,9 @@ struct WaveformStrip: View {
                     }
             )
         }
-        .accessibilityLabel("Waveform from \(timecode(start)) to \(timecode(end)). Small ticks mark phrase breaths. Touch to move the playhead.")
+    }
+
+    private var accessibilityText: String {
+        "Waveform from \(timecode(start)) to \(timecode(end)). Small ticks mark phrase breaths. Touch to move the playhead."
     }
 }
