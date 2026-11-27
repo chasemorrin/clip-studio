@@ -202,6 +202,7 @@ struct ClipEditorView: View {
                         Button("Copy Instagram caption") {
                             let t = DefaultHashtags.youtubeTitle(fromCaption: clip.caption)
                             clip.youtubeTitle = t.isEmpty ? nil : t
+                            youtubeTagText = DefaultHashtags.format(clip.hashtags)
                         }
                         .font(.footnote)
                         .tint(.red)

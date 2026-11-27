@@ -317,8 +317,13 @@ extension YouTubeOptionsSection {
     var copyCaption: (() -> Void)? {
         guard let instagramCaption, status?.state != .posted,
               !instagramCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        let t = $title
-        return { t.wrappedValue = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption) }
+        let t = $title, h = hashtags
+        return {
+            t.wrappedValue = DefaultHashtags.youtubeTitle(fromCaption: instagramCaption)
+            // Bring Instagram's hashtags along too (they go at the end of the title).
+            let tags = DefaultHashtags.split(instagramCaption).tags
+            if !tags.isEmpty { h?.wrappedValue = DefaultHashtags.format(tags) }
+        }
     }
 
     /// The title with its hashtags as one editable string; edits split back into title and hashtags.
