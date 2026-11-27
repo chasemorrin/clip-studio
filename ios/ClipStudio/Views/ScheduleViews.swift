@@ -336,8 +336,10 @@ extension YouTubeOptionsSection {
             get: { YouTubeText.fullTitle(title, tags: DefaultHashtags.parse(hashtags.wrappedValue)) },
             set: { v in
                 let parts = YouTubeText.split(v)
-                title = parts.base
-                hashtags.wrappedValue = DefaultHashtags.format(parts.tags)
+                let tags = DefaultHashtags.format(parts.tags)
+                // Only write real changes, so the two boxes can't keep updating each other.
+                if title != parts.base { title = parts.base }
+                if hashtags.wrappedValue != tags { hashtags.wrappedValue = tags }
             })
     }
 }
